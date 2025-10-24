@@ -225,15 +225,21 @@ function cleanInputUrl(url) {
 
     try {
         // 检查输入的 URL 是否已经指向 Worker 代理或其他代理
-        if (url.startsWith(WORKER_PROXY_BASE_URL) || 
-            url.includes('?url=') || 
-            url.includes('%3Furl%3D')) {
-            
+        const proxyPatterns = [
+            WORKER_PROXY_BASE_URL,
+            'm3u.521986.xyz',
+            '?url=',
+            '%3Furl%3D'
+        ];
+        
+        const isProxyUrl = proxyPatterns.some(pattern => url.includes(pattern));
+        
+        if (isProxyUrl) {
             console.log("Input contains proxy pattern. Attempting to extract original URL.");
             
             let currentUrl = url;
             let depth = 0;
-            const maxDepth = 5; // 防止无限循环
+            const maxDepth = 3; // 防止无限循环
             
             // 递归提取原始URL
             while (depth < maxDepth) {
@@ -245,6 +251,12 @@ function cleanInputUrl(url) {
                         if (extractedUrl) {
                             currentUrl = decodeURIComponent(extractedUrl);
                             depth++;
+                            
+                            // 检查是否还需要继续提取
+                            const stillProxy = proxyPatterns.some(pattern => currentUrl.includes(pattern));
+                            if (!stillProxy) {
+                                break;
+                            }
                             continue;
                         }
                     }
@@ -255,6 +267,7 @@ function cleanInputUrl(url) {
                 }
             }
             
+            console.log(`Extracted original URL: ${currentUrl}`);
             return currentUrl;
         }
         
@@ -264,6 +277,7 @@ function cleanInputUrl(url) {
     
     return url;
 }
+
             /**
              * 将原始 URL 转换为 Worker 代理 URL 或返回原始 URL (取决于开关)
              */
@@ -512,5 +526,6 @@ function cleanInputUrl(url) {
     </script>
 </body>
 </html>
+
 
 
