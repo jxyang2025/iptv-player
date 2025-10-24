@@ -1,5 +1,5 @@
 // Worker 脚本 - 解决 CORS, HLS 相对路径, 并增强 Header 兼容性
-// ⭐ 关键更新: 阻止 Worker 代理指向自身的链接，修复 522 递归错误。
+// ⭐ 关键更新: 阻止 Worker 代理指向自身的链接，修复 522 递归错误，并重写 M3U8 中的链接。
 
 // 辅助函数：确保所有响应都包含 CORS 头部
 function addCORSHeaders(response) {
@@ -13,11 +13,19 @@ function addCORSHeaders(response) {
     return newResponse;
 }
 
-// 辅助函数：将 M3U/M3U8 中的链接重写为指向 Worker 代理的链接
+/**
+ * 辅助函数：将 M3U/M3U8 中的链接重写为指向 Worker 代理的链接
+ * @param {string} link - M3U/M3U8 文件中解析到的链接
+ * @param {string} workerBase - Worker 自身的基准 URL (例如: https://your.workers.dev/)
+ * @param {string} targetUrl - 当前 M3U/M3U8 文件的原始 URL，用作解析相对路径的基准
+ * @returns {string} - 重写后的 Worker 代理 URL
+ */
 function rewriteLink(link, workerBase, targetUrl) {
     // 1. ⭐ CRUCIAL FIX: 检查链接是否已经指向 Worker 代理本身 ⭐
     // 如果链接已经是代理格式 (例如: worker.dev/?url=...)，则不进行二次重写
     if (link.startsWith(workerBase)) {
+        // 由于客户端可能输入双重代理，Worker 内部如果遇到双重代理，
+        // 应该尝试解析并返回内部链接，但保险起见，这里直接返回，让客户端或下一层Worker处理。
         console.log(`Skipping rewrite for already proxied link: ${link}`);
         return link; 
     }
@@ -46,7 +54,7 @@ addEventListener('fetch', event => {
 async function handleRequest(request) {
   const url = new URL(request.url);
   
-  // 处理 OPTIONS 预检请求
+  // ⭐ 处理 CORS Preflight (OPTIONS) 请求 ⭐
   if (request.method === 'OPTIONS') {
     return addCORSHeaders(new Response(null, { status: 204 }));
   }
@@ -84,9 +92,12 @@ async function handleRequest(request) {
     requestHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36');
     // 使用 targetUrl 的 origin 作为 Referer
     try {
-        requestHeaders.set('Referer', new URL(targetUrl).origin + '/');
+        const targetOrigin = new URL(targetUrl).origin;
+        requestHeaders.set('Referer', targetOrigin + '/');
+        // 添加 Host 头部，有助于某些 CDN/源站识别
+        requestHeaders.set('Host', targetOrigin.replace(/https?:\/\//, ''));
     } catch (e) {
-        // 如果 targetUrl 不是有效 URL，忽略 Referer 设置
+        // 如果 targetUrl 不是有效 URL，忽略 Referer 和 Host 设置
     }
 
     // 2. 向目标 URL 发起请求
@@ -96,26 +107,19 @@ async function handleRequest(request) {
         redirect: 'follow'
     });
     
-    // 3. 检查是否是 M3U/M3U8 播放列表
-    const urlPath = new URL(targetUrl).pathname.toLowerCase();
-    const isM3UFile = urlPath.endsWith('.m3u') || urlPath.endsWith('.m3u8') || targetUrl.includes('interface.txt');
+    // 3. 检查是否是 M3U/M3U8 文件 (需要重写内部链接)
+    const contentType = response.headers.get('content-type') || '';
+    const isPlaylist = targetUrl.toLowerCase().endsWith('.m3u') || targetUrl.toLowerCase().endsWith('.m3u8') || contentType.includes('mpegurl');
 
-    if (isM3UFile) {
-        // 如果源站返回非 200 状态 (如 304, 404, 500), 直接转发状态码并添加 CORS 头部
-        if (response.status !== 200) {
-            console.warn(`Proxying non-200 status (${response.status}) for playlist: ${targetUrl}`);
-            return addCORSHeaders(response); 
-        }
-
-        // --- 仅处理 200 OK 的播放列表，并进行链接重写 ---
+    if (isPlaylist) {
         const text = await response.text();
         
-        // 逐行解析并重写所有流链接，使其指向 Worker 代理
+        // 核心 HLS 链接重写逻辑
         const rewrittenText = text.split('\n').map(line => {
             const trimmedLine = line.trim();
-            // 检查行是否是流链接 (非指令 # 开头)
+            // 检查是否是需要重写的 URL 行（非空、非注释行）
             if (trimmedLine.length > 0 && !trimmedLine.startsWith('#')) {
-                 // 修正：确保传入了 targetUrl 以便解析相对路径，并传入 workerBase 检查递归
+                // 仅重写非注释行
                 return rewriteLink(trimmedLine, WORKER_PROXY_BASE_URL, targetUrl);
             }
             return line;
@@ -151,9 +155,9 @@ async function handleRequest(request) {
   } catch (e) {
     // 代理请求失败或内部 Worker 错误
     console.error("Proxy Error:", e.message);
-    const errorBody = `代理请求失败：${e.message || '未知错误'}。提示：请检查您的 M3U 订阅链接是否有效，以及 Worker 配置是否正确。`;
+    const errorBody = `代理请求失败：${e.message || '未知错误'}。提示：请检查您的 M3U 订阅链接是否有效，或源站是否可用。`;
     const errorResponse = new Response(errorBody, {
-        status: 504, // 使用 504 Gateway Timeout 表示 Worker 无法连接目标
+        status: 500,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' }
     });
     return addCORSHeaders(errorResponse);
