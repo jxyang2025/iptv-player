@@ -1,250 +1,143 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const iptvUrlInput = document.getElementById('iptv-url');
-    const loadButton = document.getElementById('load-playlist');
-    const channelListUl = document.getElementById('channels');
-    const statusMessage = document.getElementById('status-message');
-    const videoElement = document.getElementById('tv-player');
+// 辅助函数：确保所有响应都包含 CORS 头部
+function addCORSHeaders(response) {
+    const newResponse = new Response(response.body, response);
+    newResponse.headers.set('Access-Control-Allow-Origin', '*');
+    newResponse.headers.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
+    newResponse.headers.set('Access-Control-Allow-Headers', '*');
+    // 转发预检请求的头部
+    newResponse.headers.set('Access-Control-Max-Age', '86400');
+    return newResponse;
+}
+
+// ⭐ 修复步骤 1: 专门处理 OPTIONS (CORS Preflight) 请求
+function handleOptions(request) {
+  if (request.headers.get('Origin') !== null &&
+      request.headers.get('Access-Control-Request-Method') !== null &&
+      request.headers.get('Access-Control-Request-Headers') !== null) {
+    // 响应预检请求，返回 200 OK 和 CORS 头部
+    return addCORSHeaders(new Response(null, {
+      status: 200,
+    }));
+  } else {
+    // 非法 OPTIONS 请求
+    return new Response(null, {
+      status: 400,
+    });
+  }
+}
+
+addEventListener('fetch', event => {
+  event.respondWith(handleRequest(event.request))
+})
+
+async function handleRequest(request) {
+  
+  // ⭐ 修复步骤 2: 在处理 GET/POST 之前，先处理 OPTIONS
+  if (request.method === 'OPTIONS') {
+    return handleOptions(request);
+  }
+  
+  const url = new URL(request.url);
+  const targetUrl = url.searchParams.get('url');
+  // 保持与前端 app.js 匹配的 Worker 代理基础 URL
+  const WORKER_PROXY_BASE_URL = url.origin + url.pathname; 
+
+  if (!targetUrl) {
+    const errorResponse = new Response('错误: 请提供 M3U 订阅链接或流地址作为 "url" 参数。', { 
+        status: 400,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+    });
+    return addCORSHeaders(errorResponse);
+  }
+
+  // ⭐ 关键修复：清理和设置请求头部，以模仿真实的客户端请求，避免源站拒绝 (如 VLC)
+  const headers = new Headers(request.headers);
+  // 移除可能导致问题的头部
+  headers.delete('Host');
+  headers.delete('Connection');
+  headers.delete('cf-ray');
+  headers.delete('x-forwarded-for'); 
+  // 模仿浏览器的 User-Agent，增加成功率
+  headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36');
+  // 尝试设置 Referer，对于某些源站是必需的（模仿请求来源）
+  headers.set('Referer', new URL(targetUrl).origin + '/');
+  // 确保 Content-Type 是通用的
+  headers.set('Content-Type', 'application/json, text/plain, */*');
+
+
+  try {
+    // 向目标 URL 发起请求，注意携带修改后的 headers 
+    const response = await fetch(targetUrl, {
+      method: request.method,
+      headers: headers,
+      redirect: 'follow'
+    });
     
-    // 初始化 Video.js 播放器
-    const player = videojs(videoElement);
+    // --- M3U 文件内容重写逻辑 ---
+    
+    // 检查内容类型是否为 M3U/HLS 播放列表
+    const contentType = response.headers.get('content-type') || '';
+    const isM3U = contentType.includes('application/vnd.apple.mpegurl') || 
+                  contentType.includes('application/x-mpegurl') || 
+                  targetUrl.toLowerCase().endsWith('.m3u8') || 
+                  targetUrl.toLowerCase().endsWith('.m3u');
 
-    // ==========================================================
-    // !!! 关键配置: Cloudflare Worker 代理地址 !!!
-    // ==========================================================
-    // ⭐⭐ 请将此地址替换为您自己部署的 Cloudflare Worker 域名 ⭐⭐
-    // 只有专用的 Worker 代理才能解决 HLS 流（M3U8）的 CORS 跨域和相对路径问题。
-    // 公共代理 (如 AllOrigins) 无法正确处理 HLS 视频片段，导致 400 错误。
-    // 格式: https://YOUR-IPTV-PROXY.workers.dev/?url=
-    const WORKER_PROXY_BASE_URL = 'https://m3u.521986.xyz/?url='; 
+    if (response.ok && isM3U) {
+        const text = await response.text();
+        // 获取 M3U/M3U8 文件的基础 URL，用于解析相对路径
+        const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
 
-    /**
-     * 更新状态信息
-     * @param {string} message - 要显示的消息
-     * @param {string} type - 消息类型 ('info', 'error', 'success')
-     */
-    function updateStatus(message, type = 'info') {
-        statusMessage.textContent = message;
-        statusMessage.style.color = {
-            'info': 'yellow',
-            'error': 'red',
-            'success': 'lightgreen'
-        }[type] || 'yellow';
-    }
-
-    /**
-     * 获取 M3U 文件内容 (通过 Worker 代理)
-     * @param {string} url - M3U 订阅链接
-     * @returns {Promise<string|null>} M3U 文件内容或 null
-     */
-    async function fetchM3UContent(url) {
-        // 更新状态信息以提示使用 Worker 代理
-        updateStatus('正在通过 Worker 代理加载 M3U 文件...', 'info');
-        
-        // 使用 Worker 代理 URL 结构：Worker_URL?url=Original_URL
-        const proxyUrl = WORKER_PROXY_BASE_URL + encodeURIComponent(url);
-
-        try {
-            // 不再传入自定义 headers，Worker 会自行处理
-            const response = await fetch(proxyUrl); 
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                // 提示用户检查 Worker 地址或源站
-                updateStatus(`加载 M3U 失败: 状态码 ${response.status}。请检查 Worker 代理地址是否正确或流源是否有效。`, 'error');
-                console.error("Fetch Error Details:", errorText);
-                return null;
-            }
-
-            const m3uContent = await response.text();
-            updateStatus('M3U 文件加载成功！正在解析频道...', 'info');
-            return m3uContent;
-
-        } catch (e) {
-            updateStatus(`网络请求失败 (请检查 Worker 地址是否正确): ${e.message}`, 'error');
-            return null;
-        }
-    }
-
-    /**
-     * 解析 M3U 文件内容
-     * @param {string} content - M3U 文件文本内容
-     * @returns {Array<{name: string, url: string}>} 频道列表
-     */
-    function parseM3U(content) {
-        const lines = content.split('\n');
-        const channels = [];
-        let currentChannel = {};
-
-        for (const line of lines) {
-            if (line.startsWith('#EXTINF')) {
-                // 提取频道名称
-                const match = line.match(/,(.*)$/);
-                if (match) {
-                    currentChannel.name = match[1].trim();
+        // 重写 M3U/M3U8 文件内容，将所有相对或绝对链接都包装到 Worker 代理中
+        const rewrittenText = text.split('\n').map(line => {
+            const trimmedLine = line.trim();
+            // 只处理非注释行且包含链接的行
+            if (trimmedLine.length > 0 && !trimmedLine.startsWith('#')) {
+                // 使用 M3U 文件本身的基准 URL 来解析相对路径
+                try {
+                    const fullLink = new URL(trimmedLine, baseUrl).href;
+                    // 构造代理 URL: WORKER_PROXY_BASE_URL + ?url=Original_URL
+                    return WORKER_PROXY_BASE_URL + '?url=' + encodeURIComponent(fullLink);
+                } catch(e) {
+                    // 如果解析失败，返回原样
+                    return line;
                 }
-            } else if (line.startsWith('http') || line.startsWith('https')) {
-                // 提取频道URL
-                currentChannel.url = line.trim();
-                if (currentChannel.name && currentChannel.url) {
-                    channels.push(currentChannel);
-                }
-                currentChannel = {}; // 重置
             }
-        }
-        return channels;
-    }
+            return line;
+        }).join('\n');
 
-    /**
-     * 渲染频道列表
-     * @param {Array<{name: string, url: string}>} channels - 频道列表
-     */
-    function renderChannels(channels) {
-        channelListUl.innerHTML = '';
-        if (channels.length === 0) {
-            channelListUl.innerHTML = '<p>未找到频道。</p>';
-            return;
-        }
-
-        channels.forEach(channel => {
-            const listItem = document.createElement('li');
-            const link = document.createElement('a');
-            
-            link.href = '#';
-            link.textContent = channel.name;
-            link.dataset.url = channel.url;
-            link.dataset.name = channel.name;
-
-            link.addEventListener('click', (e) => {
-                e.preventDefault();
-                // 移除所有高亮
-                document.querySelectorAll('#channels li a').forEach(a => a.classList.remove('active'));
-                // 添加当前高亮
-                link.classList.add('active');
-                
-                playChannel(link.dataset.url, link.dataset.name);
-            });
-
-            listItem.appendChild(link);
-            channelListUl.appendChild(listItem);
+        // 创建重写后的响应
+        const newResponse = new Response(rewrittenText, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers
         });
 
-        updateStatus(`成功加载 ${channels.length} 个频道。`, 'success');
+        // 强制设置为正确的 MIME 类型
+        newResponse.headers.set('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+        
+        // 添加 CORS 头部并返回
+        return addCORSHeaders(newResponse);
+
+    } else {
+        // 标准代理 (适用于 TS 视频片段、密钥文件或非 M3U 请求)
+        const newResponse = new Response(response.body, response);
+
+        // 优化：防止 Cloudflare Edge 对视频内容过度缓存
+        const responseContentType = newResponse.headers.get('content-type') || '';
+        if (responseContentType.includes('video') || responseContentType.includes('application/octet-stream')) {
+             newResponse.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        }
+        
+        // 添加 CORS 头部并返回
+        return addCORSHeaders(newResponse);
     }
 
-    /**
-     * 播放指定的频道流
-     * @param {string} url - 频道 M3U8/MP4 等流地址
-     * @param {string} name - 频道名称
-     */
-    function playChannel(url, name) {
-        updateStatus(`正在尝试播放: ${name}`, 'info');
-
-        // 停止并清理旧的 HLS 实例
-        if (player.hls) {
-            player.hls.destroy();
-            player.hls = null;
-        }
-        
-        // ⭐ 使用 Worker 代理封装流地址
-        // 这对于 HLS 片段的 CORS 和相对路径解析至关重要
-        const proxiedUrl = WORKER_PROXY_BASE_URL + encodeURIComponent(url);
-        
-        // 尝试使用 hls.js (推荐用于 M3U8)
-        if (Hls.isSupported()) {
-            player.pause(); // 暂停 Video.js
-            
-            player.hls = new Hls({
-                // 启用调试日志
-                debug: false, 
-                xhrSetup: function (xhr, url) {
-                    // Worker 代理会处理 CORS，这里可以添加额外的请求头部
-                    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest'); 
-                }
-            });
-            
-            player.hls.loadSource(proxiedUrl); // 使用代理后的 URL 加载流
-            player.hls.attachMedia(videoElement);
-
-            player.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                player.play().catch(e => {
-                    // 改进播放错误提示：如果自动播放失败，提示用户手动点击
-                    console.log("Player autoplay blocked:", e);
-                    updateStatus(`频道 ${name} 已加载。请点击播放按钮开始播放 (浏览器限制)。`, 'info');
-                });
-                updateStatus(`频道播放中: ${name}`, 'success');
-            });
-
-            player.hls.on(Hls.Events.ERROR, (event, data) => {
-                if (data.fatal) {
-                    switch(data.type) {
-                        case Hls.ErrorTypes.NETWORK_ERROR:
-                            // Worker 代理可以解决大部分网络错误，这里错误可能意味着 Worker 本身失败或源站拒绝。
-                            updateStatus(`HLS 网络错误: 无法加载流片段。请检查 Worker 代理是否正常运行或流源是否有效。`, 'error');
-                            break;
-                        case Hls.ErrorTypes.MEDIA_ERROR:
-                            updateStatus(`HLS 媒体错误: 视频播放失败。`, 'error');
-                            break;
-                        default:
-                            player.hls.destroy();
-                            updateStatus(`HLS 致命错误: ${data.details}`, 'error');
-                            break;
-                    }
-                }
-            });
-
-        } 
-        // 尝试 Video.js 原生播放 (用于 MP4 或浏览器原生支持的 HLS)
-        else if (videoElement.canPlayType('application/vnd.apple.mpegurl') || videoElement.canPlayType('application/x-mpegURL')) {
-            videoElement.src = proxiedUrl;
-            player.load();
-            player.play().catch(e => {
-                 // 改进播放错误提示
-                console.log("Player autoplay blocked:", e);
-                updateStatus(`频道 ${name} 已加载。请点击播放按钮开始播放 (浏览器限制)。`, 'info');
-            });
-            updateStatus(`频道播放中: ${name}`, 'success');
-        } 
-        // 都不支持
-        else {
-            updateStatus('错误: 您的浏览器不支持 HLS/M3U8 流播放。', 'error');
-        }
-    }
-
-    // ==========================================================
-    // 事件监听器
-    // ==========================================================
-    loadButton.addEventListener('click', async () => {
-        const m3uUrl = iptvUrlInput.value.trim();
-        if (!m3uUrl) {
-            updateStatus('请输入 M3U 订阅链接！', 'error');
-            return;
-        }
-        
-        localStorage.setItem('iptvUrl', m3uUrl);
-
-        const m3uContent = await fetchM3UContent(m3uUrl);
-        
-        if (m3uContent) {
-            const channels = parseM3U(m3uContent);
-            renderChannels(channels);
-            
-            if (channels.length > 0) {
-                // 默认播放第一个频道
-                // 使用 setTimeout 确保 DOM 渲染完成
-                setTimeout(() => {
-                    document.querySelector('#channels li a')?.click();
-                }, 50); 
-            } else {
-                 updateStatus('M3U 文件已加载，但未找到任何频道。', 'error');
-            }
-        }
+  } catch (e) {
+    // 代理请求失败：返回 500 错误
+    const errorResponse = new Response(`代理请求失败: ${e.message}`, {
+        status: 500,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
     });
-
-    // 从本地存储加载 URL (可选优化)
-    const storedUrl = localStorage.getItem('iptvUrl');
-    if (storedUrl) {
-        iptvUrlInput.value = storedUrl;
-        // 自动触发加载
-        loadButton.click(); 
-    }
-});
+    return addCORSHeaders(errorResponse);
+  }
+}
