@@ -71,6 +71,34 @@ header h1 {
     flex: 1; 
     overflow: hidden; 
 }
+/* style.css (增加/确认以下 Video.js 相关的样式) */
+
+/* 播放器容器 */
+#player-container {
+    flex: 1;
+    background-color: black;
+    position: relative; 
+}
+
+/* 核心：确保 Video.js 播放器填满其容器 */
+.video-js {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* 隐藏未加载时的默认播放按钮或海报图标，使其更干净 */
+.video-js .vjs-big-play-button {
+    /* 播放器未加载时，隐藏大播放按钮，加载后会自动显示 */
+    display: none !important;
+}
+
+/* 确保 Video.js 海报区域（poster）为空 */
+.video-js.vjs-poster-image {
+    background-color: transparent !important;
+}
+.video-js.vjs-poster {
+    background-size: cover;
+}
 
 /* 频道列表侧边栏 */
 #channel-list {
@@ -187,3 +215,4 @@ header h1 {
         text-align: center;
     }
 }
+
