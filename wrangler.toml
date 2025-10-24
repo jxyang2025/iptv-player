@@ -1,0 +1,13 @@
+name = "m3u-proxy"
+compatibility_date = "2025-10-21"
+main = "src/index.js"
+#account_id = "your-account-id"
+
+# 生产环境配置
+[env.production]
+name = "m3u-proxy"
+
+# 路由配置（可选）
+# routes = [
+#   "m3u-proxy.your-domain.workers.dev/*"
+# ]
