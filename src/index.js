@@ -1,4 +1,4 @@
-// Worker 脚本 - 解决 CORS, HLS 相对路径，并强制内容重写
+// Worker 脚本 - 最终最稳定的 HLS 代理方案
 
 // 辅助函数：确保所有响应都包含 CORS 头部
 function addCORSHeaders(response) {
@@ -6,7 +6,7 @@ function addCORSHeaders(response) {
     newResponse.headers.set('Access-Control-Allow-Origin', '*');
     newResponse.headers.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
     newResponse.headers.set('Access-Control-Allow-Headers', '*');
-    // 强制关闭缓存，防止HLS片段被CDN缓存
+    // 强制关闭缓存，确保实时流不被 CDN 缓存
     newResponse.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate'); 
     newResponse.headers.set('Pragma', 'no-cache');
     return newResponse;
@@ -29,77 +29,74 @@ async function handleRequest(request) {
     return addCORSHeaders(errorResponse);
   }
 
-  // 强力清理请求头部，模拟纯净浏览器请求
+  // ⭐ 最终最简头部：只设置 User-Agent，确保请求最“纯净”
   const newHeaders = new Headers();
-  // 使用通用的 User-Agent，防止被服务器识别为非浏览器请求
   newHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
 
   try {
-    // 代理请求
+    // 代理请求，使用最简头部
     const response = await fetch(targetUrl, {
       headers: newHeaders, 
       redirect: 'follow'
     });
+    
+    // 如果响应状态码是 4xx 或 5xx，直接返回，避免 Worker 崩溃
+    if (response.status >= 400) {
+        // 关键：将源站错误信息返回给客户端
+        return addCORSHeaders(new Response(`源站返回错误: ${response.status} ${response.statusText}`, {
+            status: response.status,
+            headers: response.headers
+        }));
+    }
 
     // 检查是否是 M3U/M3U8 文件
     const contentType = response.headers.get('content-type') || '';
     const isM3U = contentType.includes('application/vnd.apple.mpegurl') || 
                   contentType.includes('application/x-mpegURL') || 
-                  contentType.includes('text/plain') || // 有些源会错误返回 text/plain
                   targetUrl.toLowerCase().endsWith('.m3u8') || 
                   targetUrl.toLowerCase().endsWith('.m3u') || 
                   targetUrl.includes('iptv.php');
 
-    // M3U/M3U8 内容重写 (Content Rewriting)
+    // M3U/M3U8 内容重写
     if (isM3U) {
-        // ⭐ 关键修复：所有 M3U/M3U8 文件都需要重写
-        
         const responseClone = response.clone();
         let text = await responseClone.text();
-        
-        // 解析基准 URL
         const baseUrlObject = new URL(targetUrl);
         
         // 核心重写函数：将所有链接封装成 Worker 代理格式
         const rewriteLink = (link) => {
-            // 解析相对链接为绝对链接
             const absoluteLink = new URL(link, baseUrlObject.href).href;
-            // 将绝对链接封装进 Worker 的代理格式
             return `${WORKER_PROXY_BASE_URL}?url=${encodeURIComponent(absoluteLink)}`;
         };
 
         // 遍历所有行并重写：只处理非注释（#）且非空的行
         text = text.split('\n').map(line => {
             const trimmedLine = line.trim();
-            // 只重写 URL 行
             if (trimmedLine.length > 0 && !trimmedLine.startsWith('#')) {
                 return rewriteLink(trimmedLine);
             }
             return line;
         }).join('\n');
 
-        // 创建重写后的响应
         const newResponse = new Response(text, {
             status: response.status,
             statusText: response.statusText,
             headers: response.headers
         });
 
-        // 强制设置为正确的 MIME 类型
         newResponse.headers.set('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
         
-        // 添加 CORS 头部并返回
         return addCORSHeaders(newResponse);
 
     } else {
-        // 标准代理 (适用于 TS 视频片段或密钥文件)
+        // 标准代理 (TS 视频片段或密钥文件)
         const newResponse = new Response(response.body, response);
-        // 添加 CORS 头部并返回
         return addCORSHeaders(newResponse);
     }
 
   } catch (e) {
-    const errorResponse = new Response(`代理请求失败 (Worker端): ${e.message}`, { 
+    // ⭐ 如果 fetch 失败（例如 DNS 错误、连接超时），返回 500
+    const errorResponse = new Response(`代理请求失败 (Worker端网络错误): ${e.message}`, { 
         status: 500,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' }
     });
