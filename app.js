@@ -9,11 +9,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const player = videojs(videoElement);
 
     // ==========================================================
-    // !!! 关键配置: 公共 CORS 代理地址 (替代 Worker) !!!
+    // !!! 关键配置: 替换为 AllOrigins 公共 CORS 代理 !!!
     // ==========================================================
-    // 警告：公共代理不稳定且不安全，仅用于测试。
-    // 代理的调用方式是：WORKER_PROXY_BASE_URL + encodeURIComponent(目标URL)
-    const WORKER_PROXY_BASE_URL = 'https://corsproxy.io/'; 
+    // 注意：使用公共代理仍有风险，但它使用标准的查询参数格式，可能更稳定。
+    // 代理的调用方式是：WORKER_PROXY_BASE_URL + 目标URL
+    const WORKER_PROXY_BASE_URL = 'https://api.allorigins.win/raw?url='; 
 
     /**
      * 更新状态信息
@@ -35,9 +35,9 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {Promise<string|null>} M3U 文件内容或 null
      */
     async function fetchM3UContent(url) {
-        updateStatus('正在通过公共代理加载 M3U 文件...', 'info');
+        updateStatus('正在通过公共代理 (AllOrigins) 加载 M3U 文件...', 'info');
         
-        // ⭐ 核心修改: 使用公共代理的格式：proxy.io/ + encodeURIComponent(url)
+        // ⭐ 核心修改: 拼接 URL。AllOrigins 需要在它的 ?url= 后面接上 encodeURIComponent(url)
         const proxyUrl = WORKER_PROXY_BASE_URL + encodeURIComponent(url);
 
         try {
@@ -49,7 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) {
                 // 检查源站或代理是否返回 4xx/5xx 错误
                 const errorText = await response.text();
-                updateStatus(`加载 M3U 失败: 状态码 ${response.status}。可能是源站防盗链或代理失效。`, 'error');
+                updateStatus(`加载 M3U 失败: 状态码 ${response.status}。请检查流源或更换公共代理。`, 'error');
                 console.error("Fetch Error Details:", errorText);
                 return null;
             }
@@ -147,8 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let proxiedUrl = url;
         
         // ⭐ 核心修改：使用公共代理封装最终的流地址
-        // 强制使用公共代理，因为静态页面直接请求 HTTP 或跨域 HLS 都将失败
-        // 公共代理格式：proxy.io/ + encodeURIComponent(url)
+        // 公共代理格式：proxy?url= + encodeURIComponent(url)
         proxiedUrl = WORKER_PROXY_BASE_URL + encodeURIComponent(url);
         
         // 尝试使用 hls.js (推荐用于 M3U8)
@@ -158,10 +157,9 @@ document.addEventListener('DOMContentLoaded', () => {
             player.hls = new Hls({
                 // 启用调试日志
                 debug: false, 
-                // 解决某些源站需要特定的 User-Agent
                 xhrSetup: function (xhr, url) {
-                    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-                    // 注意: 无法在客户端设置 User-Agent，这需要代理服务器实现
+                    // 无法在客户端设置 User-Agent 等头部，这需要代理服务器实现
+                    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest'); 
                 }
             });
             
@@ -177,7 +175,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.fatal) {
                     switch(data.type) {
                         case Hls.ErrorTypes.NETWORK_ERROR:
-                            updateStatus(`HLS 网络错误: 无法加载流片段。请检查公共代理是否工作或流源是否有效。`, 'error');
+                            updateStatus(`HLS 网络错误: 无法加载流片段。请检查流源是否有效或更换代理。`, 'error');
                             break;
                         case Hls.ErrorTypes.MEDIA_ERROR:
                             updateStatus(`HLS 媒体错误: 视频播放失败。`, 'error');
@@ -214,7 +212,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
-        // 保存 URL 到本地存储
         localStorage.setItem('iptvUrl', m3uUrl);
 
         const m3uContent = await fetchM3UContent(m3uUrl);
@@ -225,11 +222,8 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (channels.length > 0) {
                 // 默认播放第一个频道
-                // 使用 setTimeout 确保 DOM 渲染完成
-                setTimeout(() => {
-                    // 使用可选链操作符(?)防止 DOM 元素不存在
-                    document.querySelector('#channels li a')?.click(); 
-                }, 50); 
+                // 直接点击即可
+                document.querySelector('#channels li a')?.click(); 
             } else {
                  updateStatus('M3U 文件已加载，但未找到任何频道。', 'error');
             }
@@ -240,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const storedUrl = localStorage.getItem('iptvUrl');
     if (storedUrl) {
         iptvUrlInput.value = storedUrl;
-        // 自动触发加载，但不自动播放（防止自动播放限制）
+        // 自动触发加载
         loadButton.click(); 
     }
 });
