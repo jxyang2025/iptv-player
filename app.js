@@ -9,11 +9,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const player = videojs(videoElement);
 
     // ==========================================================
-    // !!! 关键配置: 替换为 AllOrigins 公共 CORS 代理 !!!
+    // !!! 关键配置: Cloudflare Worker 代理地址 !!!
     // ==========================================================
-    // 注意：使用公共代理仍有风险，但它使用标准的查询参数格式，可能更稳定。
-    // 代理的调用方式是：WORKER_PROXY_BASE_URL + 目标URL
-    const WORKER_PROXY_BASE_URL = 'https://api.allorigins.win/raw?url='; 
+    // ⭐⭐ 请将此地址替换为您自己部署的 Cloudflare Worker 域名 ⭐⭐
+    // 只有专用的 Worker 代理才能解决 HLS 流（M3U8）的 CORS 跨域和相对路径问题。
+    // 公共代理 (如 AllOrigins) 无法正确处理 HLS 视频片段，导致 400 错误。
+    // 格式: https://YOUR-IPTV-PROXY.workers.dev/?url=
+    const WORKER_PROXY_BASE_URL = 'https://m3u.521986.xyz/?url='; 
 
     /**
      * 更新状态信息
@@ -30,25 +32,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * 获取 M3U 文件内容 (通过公共 CORS 代理)
+     * 获取 M3U 文件内容 (通过 Worker 代理)
      * @param {string} url - M3U 订阅链接
      * @returns {Promise<string|null>} M3U 文件内容或 null
      */
     async function fetchM3UContent(url) {
-        updateStatus('正在通过公共代理 (AllOrigins) 加载 M3U 文件...', 'info');
+        // 更新状态信息以提示使用 Worker 代理
+        updateStatus('正在通过 Worker 代理加载 M3U 文件...', 'info');
         
-        // 核心修复: 移除 headers: { 'Cache-Control': 'no-cache' } 
-        // 因为 AllOrigins 代理不允许这个头部，导致 CORS 预检失败。
+        // 使用 Worker 代理 URL 结构：Worker_URL?url=Original_URL
         const proxyUrl = WORKER_PROXY_BASE_URL + encodeURIComponent(url);
 
         try {
-            // 不再传入自定义 headers，以避免 CORS 预检错误
+            // 不再传入自定义 headers，Worker 会自行处理
             const response = await fetch(proxyUrl); 
 
             if (!response.ok) {
-                // 检查源站或代理是否返回 4xx/5xx 错误
                 const errorText = await response.text();
-                updateStatus(`加载 M3U 失败: 状态码 ${response.status}。请检查流源或更换公共代理。`, 'error');
+                // 提示用户检查 Worker 地址或源站
+                updateStatus(`加载 M3U 失败: 状态码 ${response.status}。请检查 Worker 代理地址是否正确或流源是否有效。`, 'error');
                 console.error("Fetch Error Details:", errorText);
                 return null;
             }
@@ -58,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return m3uContent;
 
         } catch (e) {
-            updateStatus(`网络或代理请求失败: ${e.message}`, 'error');
+            updateStatus(`网络请求失败 (请检查 Worker 地址是否正确): ${e.message}`, 'error');
             return null;
         }
     }
@@ -143,11 +145,9 @@ document.addEventListener('DOMContentLoaded', () => {
             player.hls = null;
         }
         
-        let proxiedUrl = url;
-        
-        // 核心修改：使用公共代理封装最终的流地址
-        // 公共代理格式：proxy?url= + encodeURIComponent(url)
-        proxiedUrl = WORKER_PROXY_BASE_URL + encodeURIComponent(url);
+        // ⭐ 使用 Worker 代理封装流地址
+        // 这对于 HLS 片段的 CORS 和相对路径解析至关重要
+        const proxiedUrl = WORKER_PROXY_BASE_URL + encodeURIComponent(url);
         
         // 尝试使用 hls.js (推荐用于 M3U8)
         if (Hls.isSupported()) {
@@ -157,7 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 启用调试日志
                 debug: false, 
                 xhrSetup: function (xhr, url) {
-                    // 无法在客户端设置 User-Agent 等头部，这需要代理服务器实现
+                    // Worker 代理会处理 CORS，这里可以添加额外的请求头部
                     xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest'); 
                 }
             });
@@ -178,7 +178,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.fatal) {
                     switch(data.type) {
                         case Hls.ErrorTypes.NETWORK_ERROR:
-                            updateStatus(`HLS 网络错误: 无法加载流片段 (404/防盗链)。请检查流源是否有效或更换代理。`, 'error');
+                            // Worker 代理可以解决大部分网络错误，这里错误可能意味着 Worker 本身失败或源站拒绝。
+                            updateStatus(`HLS 网络错误: 无法加载流片段。请检查 Worker 代理是否正常运行或流源是否有效。`, 'error');
                             break;
                         case Hls.ErrorTypes.MEDIA_ERROR:
                             updateStatus(`HLS 媒体错误: 视频播放失败。`, 'error');
