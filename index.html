@@ -82,7 +82,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             const iptvUrlInput = document.getElementById('iptv-url');
             const loadButton = document.getElementById('load-playlist');
-            const directPlayButton = document.getElementById('direct-play'); // 新按钮
+            const directPlayButton = document.getElementById('direct-play');
             const channelListUl = document.getElementById('channels');
             const statusMessage = document.getElementById('status-message');
             const videoElement = document.getElementById('tv-player');
@@ -92,14 +92,11 @@
 
             // ==========================================================
             // !!! 关键配置: Cloudflare Worker 代理地址 !!!
-            // ==========================================================
-            // 请确保 Worker 代理地址正确，它是解决 CORS 问题的关键
+            // 确保这里使用您在错误信息中显示的 Worker 域名
             const WORKER_PROXY_BASE_URL = 'https://m3u.521986.xyz/'; 
 
             /**
              * 更新状态信息
-             * @param {string} message - 要显示的消息
-             * @param {string} type - 消息类型 ('info', 'error', 'success')
              */
             function updateStatus(message, type = 'info') {
                 statusMessage.textContent = message;
@@ -114,13 +111,11 @@
 
             /**
              * 获取 M3U 文件内容 (通过 Worker 代理)
-             * @param {string} url - M3U 订阅链接
-             * @returns {Promise<string|null>} M3U 文件内容或 null
              */
             async function fetchM3UContent(url) {
                 updateStatus('正在通过 Worker 代理加载 M3U 文件...', 'info');
                 
-                // 构造代理 URL: WORKER_PROXY_BASE_URL + ?url=Original_URL
+                // 构造代理 URL
                 const proxyUrl = WORKER_PROXY_BASE_URL + '?url=' + encodeURIComponent(url);
 
                 try {
@@ -206,8 +201,6 @@
 
             /**
              * 播放指定的频道流
-             * @param {string} url - 频道 M3U8/MP4 等流地址
-             * @param {string} name - 频道名称
              */
             function playChannel(url, name) {
                 updateStatus(`正在尝试播放: ${name}`, 'info');
@@ -219,18 +212,17 @@
                 }
                 
                 // ⭐ 使用 Worker 代理封装流地址
-                // 这对于 HLS 片段的 CORS 和相对路径解析至关重要
                 const proxiedUrl = WORKER_PROXY_BASE_URL + '?url=' + encodeURIComponent(url);
                 
                 // 尝试使用 hls.js (推荐用于 M3U8)
                 if (Hls.isSupported()) {
-                    player.pause(); // 暂停 Video.js
+                    player.pause();
                     
                     player.hls = new Hls({
-                        // 启用调试日志
                         debug: false, 
-                        // 关键：确保 hls.js 使用 XHR 请求时，请求头能通过 Worker 代理
+                        // 确保 hls.js 的所有子请求都通过 Worker 代理
                         xhrSetup: function (xhr, url) {
+                            // 即使在 hls.js 内部，也需要确保 CORS 头部被正确转发
                             xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest'); 
                         }
                     });
@@ -240,7 +232,6 @@
 
                     player.hls.on(Hls.Events.MANIFEST_PARSED, () => {
                         player.play().catch(e => {
-                            // 改进播放错误提示：如果自动播放失败，提示用户手动点击
                             console.log("Player autoplay blocked:", e);
                             updateStatus(`频道 ${name} 已加载。请点击播放按钮开始播放 (浏览器限制)。`, 'info');
                         });
@@ -261,11 +252,15 @@
                                     updateStatus(`HLS 致命错误: ${data.details}`, 'error');
                                     break;
                             }
+                            // 尝试恢复
+                            if (!player.hls.recover(data.details)) {
+                                updateStatus(`HLS 致命错误，无法恢复: ${data.details}`, 'error');
+                            }
                         }
                     });
 
                 } 
-                // 尝试 Video.js 原生播放 (用于 MP4 或浏览器原生支持的 HLS)
+                // 尝试 Video.js 原生播放
                 else if (videoElement.canPlayType('application/vnd.apple.mpegurl') || videoElement.canPlayType('application/x-mpegURL')) {
                     videoElement.src = proxiedUrl;
                     player.load();
@@ -294,6 +289,7 @@
                 }
                 
                 localStorage.setItem('iptvUrl', m3uUrl);
+                localStorage.removeItem('directStreamUrl');
 
                 const m3uContent = await fetchM3UContent(m3uUrl);
                 
@@ -312,7 +308,7 @@
                 }
             });
 
-            // 2. 直链播放 (单流模式) - 解决您提出的问题
+            // 2. 直链播放 (单流模式)
             directPlayButton.addEventListener('click', () => {
                 const streamUrl = iptvUrlInput.value.trim();
                 if (!streamUrl) {
@@ -320,16 +316,12 @@
                     return;
                 }
                 
-                // 清空频道列表，表示当前是直链播放模式
+                // 清空频道列表
                 channelListUl.innerHTML = '<p class="p-2 text-gray-500">当前为直链播放模式。</p>';
                 localStorage.setItem('directStreamUrl', streamUrl);
-                localStorage.removeItem('iptvUrl'); // 清除 M3U 历史记录
+                localStorage.removeItem('iptvUrl');
 
-                // 检查是否是常见的流地址，如果不是，给出提示，但仍然尝试播放
-                const isCommonStream = streamUrl.toLowerCase().match(/\.(m3u8|mp4|ts|mkv)$/);
-                const streamName = isCommonStream 
-                    ? `直链流 (${streamUrl.substring(0, 40)}...)`
-                    : `直链流 (可能不是视频流: ${streamUrl.substring(0, 40)}...)`;
+                const streamName = `直链流 (${streamUrl.substring(0, 40)}...)`;
 
                 playChannel(streamUrl, streamName);
             });
