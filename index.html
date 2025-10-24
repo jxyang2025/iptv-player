@@ -3,20 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cloudflare Pages IPTV 播放器</title>
+    <title>Cloudflare IPTV 播放器</title>
     <link href="https://vjs.zencdn.net/8.5.2/video-js.css" rel="stylesheet" />
     <link href="style.css" rel="stylesheet" />
 </head>
 <body>
 
     <header>
-        <h1>Cloudflare IPTV 播放器</h1>
+        <h1>IPTV 播放器</h1>
         <div id="input-controls">
             <input type="url" id="iptv-url" placeholder="输入 M3U 订阅链接" value="" />
-            <button id="load-playlist">加载列表</button>
+            <button id="load-playlist" style="background-color: #007bff;">加载列表</button>
             
             <input type="url" id="direct-url" placeholder="输入 M3U8/HLS 链接直接播放" />
-            <button id="direct-play">直接播放</button>
+            <button id="direct-play" style="background-color: #28a745;">直接播放</button>
             
             <span id="status-message"></span>
         </div>
@@ -26,14 +26,14 @@
         <aside id="channel-list">
             <h2>频道列表</h2>
             <ul id="channels">
-                <p>请先输入 M3U 链接并点击加载。</p>
+                <p style="padding: 10px; color: #aaa;">请先输入 M3U 链接并点击加载。</p>
             </ul>
         </aside>
 
         <section id="player-container">
-            <video id="tv-player" class="video-js vjs-default-skin" controls preload="auto" width="100%" height="auto" poster="">
+            <video id="tv-player" class="video-js vjs-default-skin" controls preload="auto" poster="">
                 <p class="vjs-no-js">
-                    要查看此视频，请启用 JavaScript，并考虑升级到支持 HTML5 视频的 Web 浏览器。
+                    要查看此视频，请启用 JavaScript。
                 </p>
             </video>
         </section>
