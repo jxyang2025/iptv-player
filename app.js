@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // !!! 关键配置: Cloudflare Worker 代理地址 !!!
     // ==========================================================
     // 确保这里是您的 Worker 的 HTTPS 地址，末尾包含斜杠 "/"。
-    // 日志中显示您的 Worker 域名是 m3u.521986.xyz
+    // 根据您的日志，您的 Worker 域名是 m3u.521986.xyz
     const WORKER_PROXY_BASE_URL = 'https://m3u.521986.xyz/'; 
 
     /**
@@ -43,9 +43,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const u = new URL(url);
                 const originalUrl = u.searchParams.get('url');
                 
+                // 确保解码后的 URL 被返回
                 if (originalUrl) {
                     // 如果成功提取，返回原始 URL
-                    return originalUrl;
+                    return decodeURIComponent(originalUrl);
                 }
             }
         } catch (e) {
@@ -65,8 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!WORKER_PROXY_BASE_URL) {
             return url;
         }
-        // 注意：这里我们不对 URL 进行清理，只进行编码，
-        // 因为 cleanInputUrl 应该在 fetchM3UContent 外部调用。
+        // 对 M3U/M3U8 链接进行编码，然后通过 Worker 代理
         return `${WORKER_PROXY_BASE_URL}?url=${encodeURIComponent(url)}`;
     }
 
@@ -76,18 +76,20 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {Promise<string|null>} - M3U 文件的内容文本
      */
     async function fetchM3UContent(url) {
-        const proxyUrl = getWorkerUrl(url);
+        // 使用 Worker 代理加载 M3U 文件
+        const proxyUrl = getWorkerUrl(url); 
         updateStatus(`正在通过 Worker 加载 M3U 列表: ${url.substring(0, 50)}...`, 'info');
 
         try {
             const response = await fetch(proxyUrl);
 
             if (!response.ok) {
-                throw new Error(`网络错误或源站超时: ${response.status} ${response.statusText}`);
+                // 打印完整的错误信息
+                const errorText = await response.text();
+                throw new Error(`网络错误或源站超时: ${response.status} ${response.statusText}. Worker 响应: ${errorText}`);
             }
 
             const contentType = response.headers.get('content-type') || '';
-            // 即使 Worker 已经设置了正确头部，也进行 MIME 类型检查
             if (!contentType.includes('mpegurl') && !contentType.includes('text') && !contentType.includes('plain')) {
                  console.warn(`MIME type suggests this might not be a playlist: ${contentType}`);
             }
@@ -97,9 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return text;
 
         } catch (error) {
-            // 检查是否是 522 错误
             if (error.message.includes('522')) {
-                 updateStatus('错误 (522): Worker 连接超时。请确认您输入的链接是 **原始 M3U 链接**，不是双重代理链接。', 'error');
+                 updateStatus('错误 (522): Worker 连接超时。这通常是由于 Worker 递归调用自身或无法连接到源站。请检查 M3U 链接是否有效。', 'error');
             } else {
                  updateStatus(`加载 M3U 失败: ${error.message}`, 'error');
             }
@@ -175,8 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function playChannel(rawUrl, name, index) {
         player.pause(); // 停止当前播放
 
-        // Worker 已经处理了 M3U8 文件中的所有链接重写。
-        // 所以我们只需要将这个 M3U8 链接通过 Worker 代理一次。
+        // 将 M3U8 链接通过 Worker 代理一次。
         const url = getWorkerUrl(rawUrl); 
 
         // 确保 Video.js HLS 插件可用
