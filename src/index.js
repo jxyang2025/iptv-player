@@ -1,4 +1,4 @@
-// Worker 脚本 - 最终最稳定的 HLS 代理方案
+// Worker 脚本 - 解决 CORS, HLS 相对路径, 并增强 Header 兼容性
 
 // 辅助函数：确保所有响应都包含 CORS 头部
 function addCORSHeaders(response) {
@@ -6,9 +6,8 @@ function addCORSHeaders(response) {
     newResponse.headers.set('Access-Control-Allow-Origin', '*');
     newResponse.headers.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
     newResponse.headers.set('Access-Control-Allow-Headers', '*');
-    // 强制关闭缓存，确保实时流不被 CDN 缓存
-    newResponse.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate'); 
-    newResponse.headers.set('Pragma', 'no-cache');
+    // 转发预检请求的头部
+    newResponse.headers.set('Access-Control-Max-Age', '86400');
     return newResponse;
 }
 
@@ -17,89 +16,98 @@ addEventListener('fetch', event => {
 })
 
 async function handleRequest(request) {
+  // ⭐ 关键修复：处理 CORS Preflight (OPTIONS) 请求 ⭐
+  if (request.method === 'OPTIONS') {
+    // OPTIONS请求不需要代理目标资源，直接返回200 OK状态和CORS头部即可
+    return addCORSHeaders(new Response(null, { status: 200 }));
+  }
+  
   const url = new URL(request.url);
   const targetUrl = url.searchParams.get('url');
   const WORKER_PROXY_BASE_URL = url.origin + '/'; 
 
   if (!targetUrl) {
-    const errorResponse = new Response('错误 (400): 请提供 M3U 订阅链接或流地址作为 "url" 参数。', { 
+    const errorResponse = new Response('错误: 请提供 M3U 订阅链接或流地址作为 "url" 参数。', { 
         status: 400,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' }
     });
     return addCORSHeaders(errorResponse);
   }
 
-  // ⭐ 最终最简头部：只设置 User-Agent，确保请求最“纯净”
-  const newHeaders = new Headers();
-  newHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-
+  // ⭐ 关键修复：清理和设置请求头部，以解决部分源站对请求头的严格要求 ⭐
+  // 移除可能引起问题的头部，并设置一个常见的User-Agent
+  const newHeaders = new Headers(request.headers);
+  newHeaders.delete('host'); // 移除host，fetch会自动设置
+  newHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36');
+  newHeaders.set('Referer', new URL(targetUrl).origin + '/'); // 伪造 Referer
+  
   try {
-    // 代理请求，使用最简头部
     const response = await fetch(targetUrl, {
-      headers: newHeaders, 
-      redirect: 'follow'
+      method: request.method,
+      headers: newHeaders,
+      redirect: 'follow',
+      body: request.body
     });
-    
-    // 如果响应状态码是 4xx 或 5xx，直接返回，避免 Worker 崩溃
-    if (response.status >= 400) {
-        // 关键：将源站错误信息返回给客户端
-        return addCORSHeaders(new Response(`源站返回错误: ${response.status} ${response.statusText}`, {
-            status: response.status,
-            headers: response.headers
-        }));
+
+    // 辅助函数：重写 M3U8 中的相对链接为绝对链接，并使用 Worker 代理
+    function rewriteLink(link) {
+      if (link.startsWith('http') || link.startsWith('https') || link.startsWith('//')) {
+        return link; // 已经是绝对链接
+      }
+      // 处理相对路径
+      const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+      const absoluteUrl = new URL(link, baseUrl).href;
+      // 使用 Worker 代理封装
+      return `${WORKER_PROXY_BASE_URL}?url=${encodeURIComponent(absoluteUrl)}`;
     }
-
-    // 检查是否是 M3U/M3U8 文件
-    const contentType = response.headers.get('content-type') || '';
-    const isM3U = contentType.includes('application/vnd.apple.mpegurl') || 
-                  contentType.includes('application/x-mpegURL') || 
-                  targetUrl.toLowerCase().endsWith('.m3u8') || 
-                  targetUrl.toLowerCase().endsWith('.m3u') || 
-                  targetUrl.includes('iptv.php');
-
-    // M3U/M3U8 内容重写
-    if (isM3U) {
-        const responseClone = response.clone();
-        let text = await responseClone.text();
-        const baseUrlObject = new URL(targetUrl);
+    
+    // 检查是否是 M3U 或 M3U8 文件
+    const contentType = response.headers.get('Content-Type') || '';
+    if (contentType.includes('mpegurl') || contentType.includes('application/x-mpegURL') || targetUrl.endsWith('.m3u') || targetUrl.endsWith('.m3u8')) {
         
-        // 核心重写函数：将所有链接封装成 Worker 代理格式
-        const rewriteLink = (link) => {
-            const absoluteLink = new URL(link, baseUrlObject.href).href;
-            return `${WORKER_PROXY_BASE_URL}?url=${encodeURIComponent(absoluteLink)}`;
-        };
-
-        // 遍历所有行并重写：只处理非注释（#）且非空的行
-        text = text.split('\n').map(line => {
+        // 读取文本内容
+        const text = await response.text();
+        
+        // 重写 M3U/M3U8 中的所有链接（片段或子播放列表）
+        const rewrittenText = text.split('\n').map(line => {
             const trimmedLine = line.trim();
             if (trimmedLine.length > 0 && !trimmedLine.startsWith('#')) {
+                // 仅重写非注释行
                 return rewriteLink(trimmedLine);
             }
             return line;
         }).join('\n');
 
-        const newResponse = new Response(text, {
+        // 创建重写后的响应
+        const newResponse = new Response(rewrittenText, {
             status: response.status,
             statusText: response.statusText,
             headers: response.headers
         });
 
+        // 强制设置为正确的 MIME 类型
         newResponse.headers.set('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
         
+        // 添加 CORS 头部并返回
         return addCORSHeaders(newResponse);
 
     } else {
-        // 标准代理 (TS 视频片段或密钥文件)
+        // 标准代理 (适用于 TS 视频片段或密钥文件)
         const newResponse = new Response(response.body, response);
+
+        // 优化：防止 Cloudflare Edge 对视频内容过度缓存
+        const responseContentType = newResponse.headers.get('content-type') || '';
+        if (responseContentType.includes('video') || responseContentType.includes('application/octet-stream')) {
+             newResponse.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        }
+        
+        // 添加 CORS 头部并返回
         return addCORSHeaders(newResponse);
     }
 
   } catch (e) {
-    // ⭐ 如果 fetch 失败（例如 DNS 错误、连接超时），返回 500
-    const errorResponse = new Response(`代理请求失败 (Worker端网络错误): ${e.message}`, { 
-        status: 500,
-        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-    });
+    // 代理请求失败：返回 500 错误
+    const errorResponse = new Response(`代理请求目标 URL 失败: ${e.message}`, { status: 500 });
     return addCORSHeaders(errorResponse);
   }
 }
