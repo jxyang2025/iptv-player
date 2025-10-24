@@ -2,6 +2,7 @@
 
 // 辅助函数：确保所有响应都包含 CORS 头部
 function addCORSHeaders(response) {
+    // 复制响应以修改头部
     const newResponse = new Response(response.body, response);
     newResponse.headers.set('Access-Control-Allow-Origin', '*');
     newResponse.headers.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
@@ -11,18 +12,39 @@ function addCORSHeaders(response) {
     return newResponse;
 }
 
+// 辅助函数：将 M3U/M3U8 中的链接重写为指向 Worker 代理的链接
+function rewriteLink(link, workerBase, targetUrl) {
+     // 1. 尝试将链接解析为绝对 URL
+    let absoluteUrl = link;
+    if (!link.startsWith('http')) {
+        try {
+             // 使用目标 URL (targetUrl) 作为基准解析相对路径
+             absoluteUrl = new URL(link, targetUrl).href;
+        } catch (e) {
+             console.error(`Relative URL resolution failed for: ${link} based on ${targetUrl}`, e);
+             return link; // 失败则返回原链接
+        }
+    }
+    
+    // 2. 确保链接是完整的 URL，并进行编码
+    const encodedLink = encodeURIComponent(absoluteUrl);
+    return `${workerBase}?url=${encodedLink}`;
+}
+
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request))
 })
 
 async function handleRequest(request) {
-  // ⭐ 处理 CORS Preflight (OPTIONS) 请求 ⭐
-  if (request.method === 'OPTIONS') {
-    return addCORSHeaders(new Response(null, { status: 200 }));
-  }
-  
   const url = new URL(request.url);
+  
+  // 处理 OPTIONS 预检请求
+  if (request.method === 'OPTIONS') {
+    return addCORSHeaders(new Response(null, { status: 204 }));
+  }
+
   const targetUrl = url.searchParams.get('url');
+  // WORKER_PROXY_BASE_URL 是 Worker 自身的地址，用于重写 M3U/M3U8 链接
   const WORKER_PROXY_BASE_URL = url.origin + '/'; 
 
   if (!targetUrl) {
@@ -33,66 +55,69 @@ async function handleRequest(request) {
     return addCORSHeaders(errorResponse);
   }
 
-  // ⭐ 优化：清理和设置请求头部，以增强对源站的兼容性 ⭐
-  const newHeaders = new Headers(request.headers);
-  newHeaders.delete('host'); // 移除host
-  newHeaders.delete('accept-encoding'); // 移除编码，防止Worker/源站编码不匹配
-
-  // 伪造标准浏览器头部
-  newHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36');
-  newHeaders.set('Referer', new URL(targetUrl).origin + '/'); // 伪造 Referer
-  
-  let response;
   try {
-    response = await fetch(targetUrl, {
-      method: request.method,
-      headers: newHeaders,
-      redirect: 'follow',
-      body: request.body
-    });
-
-    // ⭐ 关键检查：如果源站返回 4xx/5xx 错误，Worker 应该直接返回这个错误，而不是继续解析 ⭐
-    if (!response.ok) {
-        // 如果原始请求失败（例如 403 Forbidden 或 404 Not Found），我们返回一个包含详细信息的响应
-        const errorBody = `代理请求失败：源站返回状态码 ${response.status} ${response.statusText}。\n\n提示：此错误通常意味着您使用的视频链接已过期或被源站拒绝。`;
-        const errorResponse = new Response(errorBody, { 
-            status: 502, // 使用 502 Bad Gateway 表示代理下游错误
-            headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-        });
-        return addCORSHeaders(errorResponse);
-    }
-
-    // 辅助函数：重写 M3U8 中的相对链接为绝对链接，并使用 Worker 代理
-    function rewriteLink(link) {
-      if (link.startsWith('http') || link.startsWith('https') || link.startsWith('//')) {
-        return link; // 已经是绝对链接
-      }
-      // 处理相对路径
-      const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
-      const absoluteUrl = new URL(link, baseUrl).href;
-      // 使用 Worker 代理封装
-      return `${WORKER_PROXY_BASE_URL}?url=${encodeURIComponent(absoluteUrl)}`;
+    // 1. 准备请求头部
+    const requestHeaders = new Headers(request.headers);
+    
+    // ⭐ 关键修复: 移除可能导致 304 (Not Modified) 或 206 (Partial Content) 的头部
+    // 强制 Worker 总是获取最新完整内容，避免处理空响应体引发错误。
+    requestHeaders.delete('If-Modified-Since');
+    requestHeaders.delete('If-None-Match');
+    
+    // ⭐ 新增: 移除 Range 头部，防止 Worker 在代理 M3U/M3U8 文件时收到 206 导致读取错误。
+    // Range 头部只应由Worker在代理视频片段时（非M3U文件）转发。
+    if (targetUrl.toLowerCase().endsWith('.m3u') || targetUrl.toLowerCase().endsWith('.m3u8') || targetUrl.includes('interface.txt')) {
+        requestHeaders.delete('Range');
     }
     
-    // 检查是否是 M3U 或 M3U8 文件
-    const contentType = response.headers.get('Content-Type') || '';
-    if (contentType.includes('mpegurl') || contentType.includes('application/x-mpegURL') || targetUrl.endsWith('.m3u') || targetUrl.endsWith('.m3u8')) {
-        
-        // 读取文本内容
+    // 移除 Worker 转发时不需要的头部
+    requestHeaders.delete('host');
+    requestHeaders.delete('accept-encoding'); 
+    
+    // 伪造标准浏览器头部 (可选但推荐)
+    requestHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36');
+    // 使用 targetUrl 的 origin 作为 Referer
+    try {
+        requestHeaders.set('Referer', new URL(targetUrl).origin + '/');
+    } catch (e) {
+        // 如果 targetUrl 不是有效 URL，忽略 Referer 设置
+    }
+
+    // 2. 向目标 URL 发起请求
+    const response = await fetch(targetUrl, {
+        method: request.method,
+        headers: requestHeaders, // 使用清理后的头部
+        redirect: 'follow'
+    });
+    
+    // 3. 检查是否是 M3U/M3U8 播放列表
+    const urlPath = new URL(targetUrl).pathname.toLowerCase();
+    const isM3UFile = urlPath.endsWith('.m3u') || urlPath.endsWith('.m3u8') || targetUrl.includes('interface.txt');
+
+    if (isM3UFile) {
+        // 如果源站返回非 200 状态 (如 304, 404, 500), 直接转发状态码并添加 CORS 头部
+        if (response.status !== 200) {
+            console.warn(`Proxying non-200 status (${response.status}) for playlist: ${targetUrl}`);
+            // 确保如果源站返回 304/206/404 等，我们仍然能添加 CORS
+            return addCORSHeaders(response); 
+        }
+
+        // --- 仅处理 200 OK 的播放列表，并进行链接重写 ---
         const text = await response.text();
         
-        // 重写 M3U/M3U8 中的所有链接（片段或子播放列表）
-        const rewrittenText = text.split('\n').map(line => {
+        // 逐行解析并重写所有流链接，使其指向 Worker 代理
+        const newText = text.split('\n').map(line => {
             const trimmedLine = line.trim();
+            // 检查行是否是流链接 (非指令 # 开头)
             if (trimmedLine.length > 0 && !trimmedLine.startsWith('#')) {
-                // 仅重写非注释行
-                return rewriteLink(trimmedLine);
+                 // 修正：确保传入了 targetUrl 以便解析相对路径
+                return rewriteLink(trimmedLine, WORKER_PROXY_BASE_URL, targetUrl);
             }
             return line;
         }).join('\n');
-
+        
         // 创建重写后的响应
-        const newResponse = new Response(rewrittenText, {
+        const newResponse = new Response(newText, {
             status: response.status,
             statusText: response.statusText,
             headers: response.headers
@@ -105,7 +130,7 @@ async function handleRequest(request) {
         return addCORSHeaders(newResponse);
 
     } else {
-        // 标准代理 (适用于 TS 视频片段或密钥文件)
+        // 4. 标准代理 (适用于 TS 视频片段或密钥文件)
         const newResponse = new Response(response.body, response);
 
         // 优化：防止 Cloudflare Edge 对视频内容过度缓存
@@ -119,9 +144,13 @@ async function handleRequest(request) {
     }
 
   } catch (e) {
-    // 代理请求失败：返回 504 Gateway Timeout (更贴切) 或 500
-    // 此处捕获的是网络级错误（如 DNS 失败、超时）
-    const errorResponse = new Response(`代理请求目标 URL 失败（网络级错误）：${e.message}`, { status: 504 });
+    // 代理请求失败或内部 Worker 错误
+    console.error("Proxy Error:", e.message);
+    const errorBody = `代理请求失败：${e.message || '未知错误'}。提示：请检查您的 M3U 订阅链接是否有效，以及 Worker 配置是否正确。`;
+    const errorResponse = new Response(errorBody, {
+        status: 504, // 使用 504 Gateway Timeout 表示 Worker 无法连接目标
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+    });
     return addCORSHeaders(errorResponse);
   }
 }
