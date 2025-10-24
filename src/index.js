@@ -1,4 +1,4 @@
-// Worker 脚本 - 解决 CORS, HLS 相对路径, 并增强 Header 兼容性
+// Worker 脚本 - 解决 CORS, HLS 相对路径, 并对防盗链进行强力清理
 
 // 辅助函数：确保所有响应都包含 CORS 头部
 function addCORSHeaders(response) {
@@ -28,24 +28,22 @@ async function handleRequest(request) {
     return addCORSHeaders(errorResponse);
   }
 
-  // ⭐ 关键修复：清理和设置请求头部
-  const newHeaders = new Headers(request.headers);
+  // ⭐ 最终尝试：强力清理请求头部
+  const newHeaders = new Headers();
   
   // 1. 设置通用的 User-Agent，防止被服务器识别为非浏览器请求
   newHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
   
-  // 2. 移除所有可能触发防盗链或泄露代理身份的头部
-  newHeaders.delete('Referer'); 
-  newHeaders.delete('Origin'); // ⭐ 新增：删除 Origin 头部是解决代理问题的关键步骤之一
-  newHeaders.delete('Host');
+  // 2. 移除所有可能泄露代理身份的头部。只保留常用的浏览器头部。
+  // 注意：Worker 的 fetch API 会自动处理 Host 头部，这里不需要手动删除。
 
   try {
     // 代理请求
     const response = await fetch(targetUrl, {
-      headers: newHeaders, // 使用清理后的头部
+      headers: newHeaders, // 使用强力清理后的头部
       redirect: 'follow'
     });
-    
+
     // 检查是否是 M3U/M3U8 文件
     const contentType = response.headers.get('content-type') || '';
     const isM3U = contentType.includes('application/vnd.apple.mpegurl') || contentType.includes('application/x-mpegURL') || targetUrl.endsWith('.m3u') || targetUrl.includes('iptv.php');
