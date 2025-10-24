@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================================
     // 确保这里是您的 Worker 的 HTTPS 地址，末尾包含斜杠 "/"。
     // 日志中显示您的 Worker 域名是 m3u.521986.xyz
-    const WORKER_PROXY_BASE_URL = 'https://m3u.521986.xyz/'; 
+    const WORKER_PROXY_BASE_URL = ''; 
 
     /**
      * 更新状态信息
@@ -336,3 +336,4 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatus('等待输入 M3U 列表或流地址...', 'info');
     }
 });
+
