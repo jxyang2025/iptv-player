@@ -37,14 +37,13 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchM3UContent(url) {
         updateStatus('正在通过公共代理 (AllOrigins) 加载 M3U 文件...', 'info');
         
-        // ⭐ 核心修改: 拼接 URL。AllOrigins 需要在它的 ?url= 后面接上 encodeURIComponent(url)
+        // 核心修复: 移除 headers: { 'Cache-Control': 'no-cache' } 
+        // 因为 AllOrigins 代理不允许这个头部，导致 CORS 预检失败。
         const proxyUrl = WORKER_PROXY_BASE_URL + encodeURIComponent(url);
 
         try {
-            const response = await fetch(proxyUrl, {
-                // 强制使用 no-cache 防止代理缓存旧的 M3U 文件
-                headers: { 'Cache-Control': 'no-cache' } 
-            });
+            // 不再传入自定义 headers，以避免 CORS 预检错误
+            const response = await fetch(proxyUrl); 
 
             if (!response.ok) {
                 // 检查源站或代理是否返回 4xx/5xx 错误
@@ -146,7 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         let proxiedUrl = url;
         
-        // ⭐ 核心修改：使用公共代理封装最终的流地址
+        // 核心修改：使用公共代理封装最终的流地址
         // 公共代理格式：proxy?url= + encodeURIComponent(url)
         proxiedUrl = WORKER_PROXY_BASE_URL + encodeURIComponent(url);
         
@@ -167,7 +166,11 @@ document.addEventListener('DOMContentLoaded', () => {
             player.hls.attachMedia(videoElement);
 
             player.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                player.play().catch(e => console.log("Player autplay blocked:", e));
+                player.play().catch(e => {
+                    // 改进播放错误提示：如果自动播放失败，提示用户手动点击
+                    console.log("Player autoplay blocked:", e);
+                    updateStatus(`频道 ${name} 已加载。请点击播放按钮开始播放 (浏览器限制)。`, 'info');
+                });
                 updateStatus(`频道播放中: ${name}`, 'success');
             });
 
@@ -175,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.fatal) {
                     switch(data.type) {
                         case Hls.ErrorTypes.NETWORK_ERROR:
-                            updateStatus(`HLS 网络错误: 无法加载流片段。请检查流源是否有效或更换代理。`, 'error');
+                            updateStatus(`HLS 网络错误: 无法加载流片段 (404/防盗链)。请检查流源是否有效或更换代理。`, 'error');
                             break;
                         case Hls.ErrorTypes.MEDIA_ERROR:
                             updateStatus(`HLS 媒体错误: 视频播放失败。`, 'error');
@@ -193,7 +196,11 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (videoElement.canPlayType('application/vnd.apple.mpegurl') || videoElement.canPlayType('application/x-mpegURL')) {
             videoElement.src = proxiedUrl;
             player.load();
-            player.play().catch(e => console.log("Player autplay blocked:", e));
+            player.play().catch(e => {
+                 // 改进播放错误提示
+                console.log("Player autoplay blocked:", e);
+                updateStatus(`频道 ${name} 已加载。请点击播放按钮开始播放 (浏览器限制)。`, 'info');
+            });
             updateStatus(`频道播放中: ${name}`, 'success');
         } 
         // 都不支持
@@ -222,8 +229,10 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (channels.length > 0) {
                 // 默认播放第一个频道
-                // 直接点击即可
-                document.querySelector('#channels li a')?.click(); 
+                // 使用 setTimeout 确保 DOM 渲染完成
+                setTimeout(() => {
+                    document.querySelector('#channels li a')?.click();
+                }, 50); 
             } else {
                  updateStatus('M3U 文件已加载，但未找到任何频道。', 'error');
             }
