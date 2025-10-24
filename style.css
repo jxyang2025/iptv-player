@@ -1,15 +1,15 @@
-/* style.css */
+/* style.css: 现代深色主题和响应式布局 */
 
-/* 全局重置和基础样式 */
+/* 全局设置 */
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     margin: 0;
     padding: 0;
-    background-color: #1a1a1a; /* 深色背景 */
+    background-color: #1a1a1a; 
     color: #f0f0f0;
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
+    min-height: 100vh; /* 保证页面占满视口高度 */
 }
 
 /* 头部样式 */
@@ -17,7 +17,7 @@ header {
     background-color: #282828;
     padding: 15px 20px;
     border-bottom: 2px solid #333;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
 }
 
 header h1 {
@@ -41,8 +41,8 @@ header h1 {
     font-size: 14px;
     background-color: #383838;
     color: #f0f0f0;
-    flex-grow: 1;
-    min-width: 200px;
+    flex: 1; /* 平均分配空间 */
+    min-width: 150px;
 }
 
 #input-controls button {
@@ -51,13 +51,12 @@ header h1 {
     border-radius: 5px;
     font-size: 14px;
     cursor: pointer;
-    background-color: #4CAF50;
     color: white;
     transition: background-color 0.3s;
 }
 
 #input-controls button:hover {
-    background-color: #45a049;
+    filter: brightness(1.1);
 }
 
 #status-message {
@@ -69,8 +68,8 @@ header h1 {
 /* 主内容区域布局 (侧边栏和播放器) */
 #app-container {
     display: flex;
-    flex: 1;
-    overflow: hidden; /* 防止滚动条影响布局 */
+    flex: 1; 
+    overflow: hidden; 
 }
 
 /* 频道列表侧边栏 */
@@ -78,9 +77,9 @@ header h1 {
     width: 300px; 
     background-color: #222;
     padding: 10px;
-    overflow-y: auto; /* 允许列表内容滚动 */
+    overflow-y: auto; 
     border-right: 1px solid #333;
-    box-sizing: border-box; /* 确保 padding 不增加宽度 */
+    box-sizing: border-box; 
 }
 
 #channel-list h2 {
@@ -100,8 +99,6 @@ header h1 {
 
 .channel-group {
     border-bottom: 1px dashed #333;
-    padding: 0;
-    cursor: pointer;
 }
 
 /* 聚合后的主频道链接样式 */
@@ -120,22 +117,22 @@ header h1 {
 }
 
 .main-channel-link.active {
-    background-color: #555;
-    color: #4CAF50; 
+    background-color: #383838; /* 播放中的频道背景 */
+    color: #4CAF50; /* 播放中的频道文字颜色 */
 }
 
 /* 源切换列表 */
 .source-list {
     list-style: none;
     padding-left: 15px;
-    margin: 0;
-    display: none; /* 默认隐藏 */
+    margin: 5px 0 5px 0;
+    display: none; 
     background-color: #1e1e1e;
-    border-left: 3px solid #555;
+    border-left: 3px solid #4CAF50;
 }
 
 .source-list.visible {
-    display: block; /* 展开显示 */
+    display: block; 
 }
 
 .source-list li a {
@@ -144,7 +141,6 @@ header h1 {
     text-decoration: none;
     color: #aaa;
     font-size: 0.9em;
-    border-radius: 2px;
 }
 
 .source-list li a:hover {
@@ -155,15 +151,12 @@ header h1 {
 /* 播放器容器 */
 #player-container {
     flex: 1;
-    display: flex;
-    justify-content: center;
-    align-items: center;
     background-color: black;
-    /* 确保播放器填满剩余空间 */
-    position: relative;
+    /* 核心修复：确保播放器填满整个区域 */
+    position: relative; 
 }
 
-/* Video.js 样式覆盖 */
+/* 核心修复：确保 Video.js 播放器填满其容器 */
 .video-js {
     width: 100% !important;
     height: 100% !important;
@@ -176,12 +169,9 @@ header h1 {
     }
     #channel-list {
         width: 100%;
-        max-height: 35vh; /* 限制列表高度，防止占用过多屏幕空间 */
+        max-height: 35vh; 
         border-bottom: 1px solid #333;
         border-right: none;
-    }
-    header h1 {
-        font-size: 1.3em;
     }
     #input-controls {
         flex-direction: column;
@@ -193,7 +183,7 @@ header h1 {
         box-sizing: border-box;
     }
     #status-message {
-        margin-left: 0;
+        margin: 5px 0;
         text-align: center;
     }
 }
