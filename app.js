@@ -1,8 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     const iptvUrlInput = document.getElementById('iptv-url');
-    const directUrlInput = document.getElementById('direct-url'); // 新增：直接播放输入框
     const loadButton = document.getElementById('load-playlist');
-    const directPlayButton = document.getElementById('direct-play'); // 新增：直接播放按钮
     const channelListUl = document.getElementById('channels');
     const statusMessage = document.getElementById('status-message');
     const videoElement = document.getElementById('tv-player');
@@ -11,9 +9,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const player = videojs(videoElement);
 
     // ==========================================================
-    // !!! 关键配置: Cloudflare Worker 代理地址 !!!
+    // !!! 关键配置: 公共 CORS 代理地址 (替代 Worker) !!!
     // ==========================================================
-    const WORKER_PROXY_BASE_URL = 'https://m3u-proxy.jxy5460.workers.dev/';
+    // 警告：公共代理不稳定且不安全，仅用于测试。
+    // 代理的调用方式是：WORKER_PROXY_BASE_URL + encodeURIComponent(目标URL)
+    const WORKER_PROXY_BASE_URL = 'https://corsproxy.io/'; 
 
     /**
      * 更新状态信息
@@ -30,255 +30,179 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * 获取 M3U 文件内容 (通过 Worker 代理)
+     * 获取 M3U 文件内容 (通过公共 CORS 代理)
      * @param {string} url - M3U 订阅链接
-     * @returns {Promise<string>} M3U 文件内容的文本
+     * @returns {Promise<string|null>} M3U 文件内容或 null
      */
     async function fetchM3UContent(url) {
-        let fetchUrl = url;
+        updateStatus('正在通过公共代理加载 M3U 文件...', 'info');
         
-        if (WORKER_PROXY_BASE_URL) {
-            // 对 M3U 订阅链接使用 Worker 代理
-            fetchUrl = WORKER_PROXY_BASE_URL + '?url=' + encodeURIComponent(url);
-        }
+        // ⭐ 核心修改: 使用公共代理的格式：proxy.io/ + encodeURIComponent(url)
+        const proxyUrl = WORKER_PROXY_BASE_URL + encodeURIComponent(url);
 
         try {
-            updateStatus('正在加载频道列表...');
-            const response = await fetch(fetchUrl);
-            
+            const response = await fetch(proxyUrl, {
+                // 强制使用 no-cache 防止代理缓存旧的 M3U 文件
+                headers: { 'Cache-Control': 'no-cache' } 
+            });
+
             if (!response.ok) {
+                // 检查源站或代理是否返回 4xx/5xx 错误
                 const errorText = await response.text();
-                throw new Error(`网络请求失败，状态码: ${response.status}。Worker 错误信息: ${errorText.substring(0, 100)}`);
+                updateStatus(`加载 M3U 失败: 状态码 ${response.status}。可能是源站防盗链或代理失效。`, 'error');
+                console.error("Fetch Error Details:", errorText);
+                return null;
             }
-            
-            const text = await response.text();
-            updateStatus('频道列表加载成功。', 'success');
-            return text;
-            
-        } catch (error) {
-            updateStatus(`加载失败: ${error.message}. 检查 URL 和 Worker 代理是否正确。`, 'error');
-            console.error('Fetch M3U Error:', error);
+
+            const m3uContent = await response.text();
+            updateStatus('M3U 文件加载成功！正在解析频道...', 'info');
+            return m3uContent;
+
+        } catch (e) {
+            updateStatus(`网络或代理请求失败: ${e.message}`, 'error');
             return null;
         }
     }
-    
-    /**
-     * ⭐ 核心修改：解析 M3U 文本，按频道名称聚合源
-     * @param {string} m3uText - M3U 文件的文本内容
-     * @returns {Array<{name: string, sources: Array<{url: string, logo: string, tvgId: string}>}>} 聚合后的频道列表
-     */
-    function parseM3U(m3uText) {
-        // 使用 Map 来按频道名称聚合源
-        const channelMap = new Map();
-        const lines = m3uText.split('\n').filter(line => line.trim() !== '');
-        
-        for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('#EXTINF')) {
-                const infoLine = lines[i];
-                const urlLine = lines[i + 1];
-                
-                // 正则表达式提取名称、Logo、tvg-id等信息
-                const nameMatch = infoLine.match(/,(.*)$/);
-                const name = nameMatch ? nameMatch[1].trim() : '未知频道';
-                
-                const logoMatch = infoLine.match(/tvg-logo="([^"]*)"/);
-                const logo = logoMatch ? logoMatch[1] : '';
-                
-                const tvgIdMatch = infoLine.match(/tvg-id="([^"]*)"/);
-                const tvgId = tvgIdMatch ? tvgIdMatch[1] : '';
 
-                if (urlLine && !urlLine.startsWith('#')) {
-                    const source = {
-                        url: urlLine.trim(),
-                        logo: logo,
-                        tvgId: tvgId
-                    };
-                    
-                    if (channelMap.has(name)) {
-                        channelMap.get(name).sources.push(source);
-                    } else {
-                        channelMap.set(name, {
-                            name: name,
-                            sources: [source]
-                        });
-                    }
-                    i++; // 跳过 URL 行
+    /**
+     * 解析 M3U 文件内容
+     * @param {string} content - M3U 文件文本内容
+     * @returns {Array<{name: string, url: string}>} 频道列表
+     */
+    function parseM3U(content) {
+        const lines = content.split('\n');
+        const channels = [];
+        let currentChannel = {};
+
+        for (const line of lines) {
+            if (line.startsWith('#EXTINF')) {
+                // 提取频道名称
+                const match = line.match(/,(.*)$/);
+                if (match) {
+                    currentChannel.name = match[1].trim();
                 }
+            } else if (line.startsWith('http') || line.startsWith('https')) {
+                // 提取频道URL
+                currentChannel.url = line.trim();
+                if (currentChannel.name && currentChannel.url) {
+                    channels.push(currentChannel);
+                }
+                currentChannel = {}; // 重置
             }
         }
-        return Array.from(channelMap.values());
+        return channels;
     }
 
     /**
-     * ⭐ 核心修改：渲染聚合后的频道列表，支持源切换
-     * @param {Array<{name: string, sources: Array<{url: string, logo: string, tvgId: string}>}>} channels - 频道列表
+     * 渲染频道列表
+     * @param {Array<{name: string, url: string}>} channels - 频道列表
      */
     function renderChannels(channels) {
-        channelListUl.innerHTML = ''; // 清空现有列表
-
+        channelListUl.innerHTML = '';
         if (channels.length === 0) {
-            channelListUl.innerHTML = '<p>未找到任何频道。</p>';
+            channelListUl.innerHTML = '<p>未找到频道。</p>';
             return;
         }
 
-        channels.forEach((channel, index) => {
+        channels.forEach(channel => {
             const listItem = document.createElement('li');
-            listItem.classList.add('channel-group');
+            const link = document.createElement('a');
+            
+            link.href = '#';
+            link.textContent = channel.name;
+            link.dataset.url = channel.url;
+            link.dataset.name = channel.name;
 
-            // 主频道链接 (默认播放第一个源)
-            const mainLink = document.createElement('a');
-            mainLink.href = '#';
-            mainLink.textContent = `${channel.name} (${channel.sources.length}源)`;
-            mainLink.classList.add('main-channel-link');
-            
-            // 存储当前激活的源索引
-            mainLink.dataset.currentSourceIndex = 0; 
-            
-            // ⭐ 点击主链接：播放默认源并展开/收起源列表
-            mainLink.addEventListener('click', (e) => {
+            link.addEventListener('click', (e) => {
                 e.preventDefault();
-                const sourceList = listItem.querySelector('.source-list');
-
-                // 切换源列表的可见性
-                sourceList.classList.toggle('visible');
-
-                // 播放当前激活的源
-                const sourceIndex = mainLink.dataset.currentSourceIndex || 0;
-                const sourceUrl = channel.sources[sourceIndex].url;
+                // 移除所有高亮
+                document.querySelectorAll('#channels li a').forEach(a => a.classList.remove('active'));
+                // 添加当前高亮
+                link.classList.add('active');
                 
-                playChannel(sourceUrl, channel.name, sourceIndex);
-                
-                // 更新高亮状态
-                document.querySelectorAll('.main-channel-link').forEach(a => a.classList.remove('active'));
-                mainLink.classList.add('active');
+                playChannel(link.dataset.url, link.dataset.name);
             });
 
-            listItem.appendChild(mainLink);
-
-            // 源列表 (用于切换)
-            const sourceList = document.createElement('ul');
-            sourceList.classList.add('source-list');
-            
-            channel.sources.forEach((source, sourceIndex) => {
-                const sourceItem = document.createElement('li');
-                const sourceLink = document.createElement('a');
-                sourceLink.href = '#';
-                
-                // 显示源序号和tvgId
-                let linkText = `源 ${sourceIndex + 1}`;
-                if (source.tvgId) {
-                    linkText += ` (${source.tvgId})`;
-                }
-                sourceLink.textContent = linkText;
-                sourceLink.dataset.url = source.url;
-                
-                // ⭐ 点击源链接：切换源并播放
-                sourceLink.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    
-                    // 更新主链接的索引和高亮
-                    mainLink.dataset.currentSourceIndex = sourceIndex;
-                    document.querySelectorAll('.main-channel-link').forEach(a => a.classList.remove('active'));
-                    mainLink.classList.add('active');
-                    
-                    // 播放新源
-                    playChannel(source.url, channel.name, sourceIndex);
-                    
-                    // 可选：隐藏源列表
-                    sourceList.classList.remove('visible'); 
-                });
-                
-                sourceItem.appendChild(sourceLink);
-                sourceList.appendChild(sourceItem);
-            });
-
-            listItem.appendChild(sourceList);
+            listItem.appendChild(link);
             channelListUl.appendChild(listItem);
         });
-        
-        // 默认播放第一个频道
-        document.querySelector('.main-channel-link')?.click();
+
+        updateStatus(`成功加载 ${channels.length} 个频道。`, 'success');
     }
 
     /**
      * 播放指定的频道流
-     * @param {string} url - 频道流地址 (可能是原始M3U8链接或Worker代理后的链接)
+     * @param {string} url - 频道 M3U8/MP4 等流地址
      * @param {string} name - 频道名称
-     * @param {number} [sourceIndex] - 源序号 (可选，用于显示)
      */
-// app.js (只修改 playChannel 函数及其相关配置)
+    function playChannel(url, name) {
+        updateStatus(`正在尝试播放: ${name}`, 'info');
 
-/**
- * 播放指定的频道流
- * @param {string} url - 频道流地址 (可能是原始M3U8链接或Worker代理后的链接)
- * @param {string} name - 频道名称
- * @param {number} [sourceIndex] - 源序号 (可选，用于显示)
- */
-function playChannel(url, name, sourceIndex = 0) {
-    let display_name = `${name}`;
-    if (sourceIndex > 0) {
-        display_name += ` (源 ${sourceIndex + 1})`;
-    }
-    
-    updateStatus(`正在播放: ${display_name}`, 'info');
-
-    // 停止并清理旧的 HLS 实例
-    if (player.hls) {
-        player.hls.destroy();
-        player.hls = null;
-    }
-    
-    let proxiedUrl = url;
-    
-    // ⭐ 关键：判断是否需要代理
-    // 只有手动输入的链接（不以 Worker 地址开头）才需要在这里封装代理。
-    if (WORKER_PROXY_BASE_URL && !url.startsWith(WORKER_PROXY_BASE_URL)) {
-         proxiedUrl = WORKER_PROXY_BASE_URL + '?url=' + encodeURIComponent(url);
-    }
-    
-    // 尝试使用 hls.js
-    if (Hls.isSupported()) {
-        // ⭐ 核心修改：增加加载超时时间 (loadDataTimeout) 至 20 秒
-        const hls = new Hls({
-            // Loader 超时配置
-            loader: Hls.DefaultConfig.loader, // 使用默认 Loader
-            // 将加载 M3U8/片段的超时时间延长至 20 秒
-            // 应对 Worker 或源站的慢速响应
-            manifestLoadTimeout: 20000, 
-            levelLoadTimeout: 20000,
-            fragLoadTimeout: 20000,
-            // 解决 Safari/iOS 中可能出现的解码问题
-            safari: true 
-        });
-
-        player.hls = hls; // 存储实例以便后续清理
+        // 停止并清理旧的 HLS 实例
+        if (player.hls) {
+            player.hls.destroy();
+            player.hls = null;
+        }
         
-        // 使用代理后的 URL 加载流
-        hls.loadSource(proxiedUrl);
-        hls.attachMedia(videoElement);
-        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+        let proxiedUrl = url;
+        
+        // ⭐ 核心修改：使用公共代理封装最终的流地址
+        // 强制使用公共代理，因为静态页面直接请求 HTTP 或跨域 HLS 都将失败
+        // 公共代理格式：proxy.io/ + encodeURIComponent(url)
+        proxiedUrl = WORKER_PROXY_BASE_URL + encodeURIComponent(url);
+        
+        // 尝试使用 hls.js (推荐用于 M3U8)
+        if (Hls.isSupported()) {
+            player.pause(); // 暂停 Video.js
+            
+            player.hls = new Hls({
+                // 启用调试日志
+                debug: false, 
+                // 解决某些源站需要特定的 User-Agent
+                xhrSetup: function (xhr, url) {
+                    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+                    // 注意: 无法在客户端设置 User-Agent，这需要代理服务器实现
+                }
+            });
+            
+            player.hls.loadSource(proxiedUrl); // 使用代理后的 URL 加载流
+            player.hls.attachMedia(videoElement);
+
+            player.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                player.play().catch(e => console.log("Player autplay blocked:", e));
+                updateStatus(`频道播放中: ${name}`, 'success');
+            });
+
+            player.hls.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    switch(data.type) {
+                        case Hls.ErrorTypes.NETWORK_ERROR:
+                            updateStatus(`HLS 网络错误: 无法加载流片段。请检查公共代理是否工作或流源是否有效。`, 'error');
+                            break;
+                        case Hls.ErrorTypes.MEDIA_ERROR:
+                            updateStatus(`HLS 媒体错误: 视频播放失败。`, 'error');
+                            break;
+                        default:
+                            player.hls.destroy();
+                            updateStatus(`HLS 致命错误: ${data.details}`, 'error');
+                            break;
+                    }
+                }
+            });
+
+        } 
+        // 尝试 Video.js 原生播放 (用于 MP4 或浏览器原生支持的 HLS)
+        else if (videoElement.canPlayType('application/vnd.apple.mpegurl') || videoElement.canPlayType('application/x-mpegURL')) {
+            videoElement.src = proxiedUrl;
+            player.load();
             player.play().catch(e => console.log("Player autplay blocked:", e));
-            updateStatus(`频道播放中: ${display_name}`, 'success');
-        });
-        hls.on(Hls.Events.ERROR, function(event, data) {
-            if (data.fatal) {
-                 updateStatus(`播放错误 (${display_name}): 无法加载流或片段。请检查流地址是否有效。`, 'error');
-                console.error('HLS Fatal Error:', data);
-            }
-        });
-    } 
-    // 苹果等原生支持 HLS 的设备
-    else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
-        videoElement.src = proxiedUrl;
-        player.load();
-        player.play().catch(e => console.log("Player autplay blocked:", e));
-        updateStatus(`频道播放中: ${display_name}`, 'success');
-    } 
-    // 都不支持
-    else {
-        updateStatus('错误: 您的浏览器不支持 HLS/M3U8 流播放。', 'error');
+            updateStatus(`频道播放中: ${name}`, 'success');
+        } 
+        // 都不支持
+        else {
+            updateStatus('错误: 您的浏览器不支持 HLS/M3U8 流播放。', 'error');
+        }
     }
-}
 
     // ==========================================================
     // 事件监听器
@@ -289,44 +213,34 @@ function playChannel(url, name, sourceIndex = 0) {
             updateStatus('请输入 M3U 订阅链接！', 'error');
             return;
         }
+        
+        // 保存 URL 到本地存储
+        localStorage.setItem('iptvUrl', m3uUrl);
 
         const m3uContent = await fetchM3UContent(m3uUrl);
         
         if (m3uContent) {
             const channels = parseM3U(m3uContent);
             renderChannels(channels);
+            
+            if (channels.length > 0) {
+                // 默认播放第一个频道
+                // 使用 setTimeout 确保 DOM 渲染完成
+                setTimeout(() => {
+                    // 使用可选链操作符(?)防止 DOM 元素不存在
+                    document.querySelector('#channels li a')?.click(); 
+                }, 50); 
+            } else {
+                 updateStatus('M3U 文件已加载，但未找到任何频道。', 'error');
+            }
         }
     });
-    
-    // ⭐ 新增：直接播放按钮的事件监听器
-// ⭐ app.js 中的 directPlayButton.addEventListener 修正:
-directPlayButton.addEventListener('click', () => {
-    const directUrl = directUrlInput.value.trim();
-    if (!directUrl) {
-        updateStatus('请输入要直接播放的源地址！', 'error');
-        return;
-    }
-    // 直接播放，名称使用 URL 的一部分作为显示名称
-    let name = directUrl.substring(directUrl.lastIndexOf('/') + 1);
-    if (name.includes('?')) {
-         name = name.substring(0, name.indexOf('?'));
-    }
-    // 播放手动源，不传递 sourceIndex，让它显示为不带 (源 x) 的名称
-    playChannel(directUrl, `手动源: ${name}`); 
-    
-    // 清除列表高亮
-    document.querySelectorAll('.main-channel-link').forEach(a => a.classList.remove('active'));
-});
 
     // 从本地存储加载 URL (可选优化)
     const storedUrl = localStorage.getItem('iptvUrl');
     if (storedUrl) {
         iptvUrlInput.value = storedUrl;
+        // 自动触发加载，但不自动播放（防止自动播放限制）
+        loadButton.click(); 
     }
-    // 监听输入框变化，保存 URL
-    iptvUrlInput.addEventListener('change', () => {
-        localStorage.setItem('iptvUrl', iptvUrlInput.value.trim());
-    });
 });
-
-
