@@ -1,426 +1,531 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HLS 流媒体播放器</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
+    <title>Cloudflare Worker IPTV 播放器</title>
+    <!-- Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Video.js for the player UI -->
+    <link href="https://vjs.zencdn.net/8.5.2/video-js.css" rel="stylesheet" />
+    <script src="https://vjs.zencdn.net/8.5.2/video.min.js"></script>
+    
+    <!-- Hls.js for native M3U8 playback in more browsers -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.10"></script>
+    
     <style>
-        body {
-            padding: 20px;
-            background-color: #f8f9fa;
+        /* Custom styles for dark theme and layout */
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #0d1117; /* Dark BG */
+            color: #c9d1d9; /* Light text */
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
         }
-        .player-container {
-            max-width: 1000px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 0 20px rgba(0,0,0,0.1);
-            padding: 20px;
-        }
-        #videoPlayer {
+        #app-container { 
+            max-width: 1400px;
             width: 100%;
-            background: #000;
-            border-radius: 5px;
+            display: flex;
+            flex-direction: row;
+            padding: 1rem;
         }
-        .status-box {
-            padding: 10px;
-            border-radius: 5px;
-            margin: 10px 0;
-            display: none;
+        .video-js { 
+            width: 100%; 
+            height: 100%; 
+            border-radius: 0.5rem;
         }
-        .error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+        #channel-list { 
+            min-width: 250px; 
+            background-color: #161b22; 
+            border-radius: 0.5rem; 
+            overflow-y: auto; 
+            max-height: calc(100vh - 8rem); 
+            margin-right: 1rem;
         }
-        .success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+        #channels {
+            list-style: none;
+            padding: 0;
+            margin: 0;
         }
-        .loading {
-            background-color: #e2e3e5;
-            color: #383d41;
-            border: 1px solid #d6d8db;
+        #channels li a {
+            display: block;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #21262d;
+            text-decoration: none;
+            color: #c9d1d9;
+            transition: background-color 0.2s;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
-        .settings-panel {
-            margin-top: 20px;
-            padding: 15px;
-            background: #f1f1f1;
-            border-radius: 5px;
+        #channels li a:hover {
+            background-color: #30363d;
         }
-        .channel-list {
-            max-height: 300px;
-            overflow-y: auto;
-            margin-top: 10px;
+        #channels li a.active {
+            background-color: #007acc; /* Blue highlight */
+            color: white;
+            font-weight: bold;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            #app-container {
+                flex-direction: column;
+                padding: 0.5rem;
+            }
+            #channel-list {
+                max-height: 40vh; 
+                width: 100%;
+                margin-right: 0;
+                margin-bottom: 0.5rem;
+            }
+            #player-container {
+                width: 100%;
+                min-height: 50vh;
+            }
         }
     </style>
 </head>
-<body>
-    <div class="player-container">
-        <h2 class="text-center mb-4">HLS 流媒体播放器</h2>
-        
-        <div class="row">
-            <div class="col-md-8">
-                <video id="videoPlayer" controls></video>
-                <div id="statusMessage" class="status-box"></div>
-            </div>
-            <div class="col-md-4">
-                <div class="settings-panel">
-                    <div class="mb-3">
-                        <label for="iptvUrl" class="form-label">M3U8 链接</label>
-                        <div class="input-group">
-                            <input type="text" class="form-control" id="iptvUrl" placeholder="输入 M3U8 链接">
-                            <button class="btn btn-primary" id="loadBtn">加载</button>
+<body class="min-h-screen">
+
+    <!-- 应用容器 -->
+    <div id="app-container" class="flex flex-col lg:flex-row w-full p-4">
+
+        <!-- 频道列表 (左侧/顶部) -->
+        <aside id="channel-list" class="p-3 lg:w-1/4 flex-shrink-0">
+            <h2 class="text-xl font-bold mb-3 text-white">频道列表</h2>
+            <ul id="channels" class="text-sm">
+                <p class="p-2 text-gray-500">请先输入 URL 并加载。</p>
+            </ul>
+        </aside>
+
+        <!-- 播放器区域 (右侧/底部) -->
+        <section id="player-container" class="lg:w-3/4 w-full flex flex-col space-y-4">
+            
+            <!-- URL 输入和加载按钮 -->
+            <header class="bg-[#161b22] p-4 rounded-lg shadow-md">
+                <h1 class="text-2xl font-extrabold text-white mb-3">IPTV 播放器</h1>
+                <div id="url-input-area" class="flex flex-col gap-3">
+                    <!-- 输入框 -->
+                    <input 
+                        type="url" 
+                        id="iptv-url" 
+                        placeholder="输入 M3U 订阅链接或单个流地址" 
+                        value="" 
+                        class="flex-grow p-2.5 rounded-lg bg-[#0d1117] border border-[#30363d] text-white focus:ring-blue-500 focus:border-blue-500"
+                    />
+
+                    <!-- 按钮和开关 -->
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <!-- Worker 开关 -->
+                        <div class="flex items-center space-x-2">
+                            <input type="checkbox" id="use-proxy" checked class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                            <label for="use-proxy" class="text-sm text-gray-300 select-none">使用 Worker 代理 (解决 CORS/相对路径)</label>
                         </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="proxyUrl" class="form-label">代理地址</label>
-                        <div class="input-group">
-                            <input type="text" class="form-control" id="proxyUrl" placeholder="https://your-worker.workers.dev">
-                            <button class="btn btn-outline-secondary" id="toggleProxyBtn">启用代理</button>
+
+                        <!-- 按钮组 -->
+                        <div class="flex gap-2">
+                            <button 
+                                id="load-playlist" 
+                                class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-200"
+                            >
+                                加载 M3U 列表
+                            </button>
+                            <button 
+                                id="direct-play" 
+                                class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-200"
+                            >
+                                直链播放
+                            </button>
                         </div>
-                    </div>
-                    
-                    <div class="form-check form-switch mb-3">
-                        <input class="form-check-input" type="checkbox" id="autoPlaySwitch" checked>
-                        <label class="form-check-label" for="autoPlaySwitch">自动播放</label>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <button class="btn btn-outline-primary w-100" id="sampleBtn">示例频道</button>
-                    </div>
-                    
-                    <div class="channel-list" id="channelList">
-                        <!-- 频道列表将通过JS动态加载 -->
                     </div>
                 </div>
+                <div class="mt-3 text-sm h-5">
+                    <span id="status-message" class="text-yellow-500">等待输入...</span>
+                </div>
+            </header>
+
+            <!-- 视频播放器 -->
+            <div class="flex-grow bg-[#161b22] rounded-lg p-1.5 shadow-xl relative min-h-[300px]">
+                <video 
+                    id="tv-player" 
+                    class="video-js vjs-default-skin w-full h-full rounded-md" 
+                    controls 
+                    preload="auto" 
+                    poster="https://placehold.co/1280x720/161b22/c9d1d9?text=IPTV+Stream"
+                >
+                    <p class="vjs-no-js">
+                        要查看此视频，请启用 JavaScript，并考虑升级到支持 HTML5 视频的浏览器。
+                    </p>
+                </video>
             </div>
-        </div>
+        </section>
     </div>
 
+    <!-- JavaScript Logic -->
     <script>
-        // 全局变量
-        const videoPlayer = document.getElementById('videoPlayer');
-        const iptvUrlInput = document.getElementById('iptvUrl');
-        const loadButton = document.getElementById('loadBtn');
-        const proxyUrlInput = document.getElementById('proxyUrl');
-        const toggleProxyBtn = document.getElementById('toggleProxyBtn');
-        const autoPlaySwitch = document.getElementById('autoPlaySwitch');
-        const sampleBtn = document.getElementById('sampleBtn');
-        const channelList = document.getElementById('channelList');
-        const statusMessage = document.getElementById('statusMessage');
-        
-        let hls = null;
-        let isProxyEnabled = false;
-        
-        // 初始化
-        document.addEventListener('DOMContentLoaded', function() {
-            // 从 localStorage 加载设置
-            loadSettings();
+        document.addEventListener('DOMContentLoaded', () => {
+            const iptvUrlInput = document.getElementById('iptv-url');
+            const loadButton = document.getElementById('load-playlist');
+            const directPlayButton = document.getElementById('direct-play'); // 直链播放按钮
+            const useProxyCheckbox = document.getElementById('use-proxy'); // Worker 开关
+            const channelListUl = document.getElementById('channels');
+            const statusMessage = document.getElementById('status-message');
+            const videoElement = document.getElementById('tv-player');
             
-            // 初始化 HLS.js
-            if (Hls.isSupported()) {
-                hls = new Hls({
-                    maxBufferLength: 30,
-                    maxMaxBufferLength: 600,
-                    maxBufferSize: 60 * 1000 * 1000,
-                    maxBufferHole: 5.0,
-                    lowLatencyMode: false,
-                    enableWorker: true,
-                    startLevel: -1,
-                });
-                
-                hls.on(Hls.Events.MEDIA_ATTACHED, function() {
-                    updateStatus('播放器已初始化', 'success');
-                });
-                
-                hls.on(Hls.Events.ERROR, function(event, data) {
-                    let errorType = data.type;
-                    let errorDetails = data.details;
-                    let errorFatal = data.fatal;
+            // 初始化 Video.js 播放器
+            const player = videojs(videoElement, {
+                 autoplay: true,
+                 muted: true, // 初始静音以规避浏览器自动播放限制
+                 controls: true,
+            });
+
+            // ==========================================================
+            // !!! 关键配置: Cloudflare Worker 代理地址 !!!
+            // ==========================================================
+            // 确保这里是您的 Worker 的 HTTPS 地址，末尾包含斜杠 "/"。
+            const WORKER_PROXY_BASE_URL = 'https://m3u.521986.xyz/'; 
+
+            /**
+             * 更新状态信息
+             */
+            function updateStatus(message, type = 'info') {
+                statusMessage.textContent = message;
+                statusMessage.style.color = {
+                    'info': '#fcd34d', 
+                    'error': '#f87171', 
+                    'success': '#4ade80' 
+                }[type] || '#fcd34d';
+            }
+
+            /**
+             * 检查是否启用 Worker 代理
+             */
+            function isProxyEnabled() {
+                return useProxyCheckbox.checked;
+            }
+
+            /**
+             * ⭐ 核心修复：清理用户输入的 URL，防止双重代理 ⭐
+             */
+/**
+ * ⭐ 核心修复：清理用户输入的 URL，防止双重代理 ⭐
+ */
+/**
+ * ⭐ 核心修复：清理用户输入的 URL，防止双重代理 ⭐
+ */
+function cleanInputUrl(url) {
+    // 如果未启用 Worker 代理，直接返回
+    if (!isProxyEnabled()) {
+        return url;
+    }
+
+    try {
+        // 检查输入的 URL 是否已经指向 Worker 代理或其他代理
+        const proxyPatterns = [
+            WORKER_PROXY_BASE_URL,
+            'm3u.521986.xyz',
+            '?url=',
+            '%3Furl%3D'
+        ];
+        
+        const isProxyUrl = proxyPatterns.some(pattern => url.includes(pattern));
+        
+        if (isProxyUrl) {
+            console.log("Input contains proxy pattern. Attempting to extract original URL.");
+            
+            let currentUrl = url;
+            let depth = 0;
+            const maxDepth = 3; // 防止无限循环
+            
+            // 递归提取原始URL
+            while (depth < maxDepth) {
+                try {
+                    const urlObj = new URL(currentUrl);
                     
-                    let errorMsg = `错误: ${errorType} - ${errorDetails}`;
-                    updateStatus(errorMsg, 'error');
-                    
-                    if (errorFatal) {
-                        switch(data.type) {
-                            case Hls.ErrorTypes.NETWORK_ERROR:
-                                hls.startLoad();
+                    if (urlObj.searchParams.has('url')) {
+                        const extractedUrl = urlObj.searchParams.get('url');
+                        if (extractedUrl) {
+                            currentUrl = decodeURIComponent(extractedUrl);
+                            depth++;
+                            
+                            // 检查是否还需要继续提取
+                            const stillProxy = proxyPatterns.some(pattern => currentUrl.includes(pattern));
+                            if (!stillProxy) {
                                 break;
-                            case Hls.ErrorTypes.MEDIA_ERROR:
-                                hls.recoverMediaError();
-                                break;
-                            default:
-                                destroyPlayer();
-                                break;
+                            }
+                            continue;
                         }
                     }
-                });
-            } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
-                // 原生 HLS 支持 (Safari)
-                videoPlayer.addEventListener('error', function() {
-                    updateStatus('播放错误: ' + videoPlayer.error.code, 'error');
-                });
-            } else {
-                updateStatus('您的浏览器不支持 HLS 播放', 'error');
+                    break;
+                    
+                } catch (e) {
+                    break;
+                }
             }
             
-            // 事件监听
-            loadButton.addEventListener('click', loadStream);
-            toggleProxyBtn.addEventListener('click', toggleProxy);
-            sampleBtn.addEventListener('click', loadSampleChannels);
-            
-            // 输入框回车事件
-            iptvUrlInput.addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    loadStream();
+            console.log(`Extracted original URL: ${currentUrl}`);
+            return currentUrl;
+        }
+        
+    } catch (e) {
+        console.error("Error cleaning input URL:", e);
+    }
+    
+    return url;
+}
+
+            /**
+             * 将原始 URL 转换为 Worker 代理 URL 或返回原始 URL (取决于开关)
+             */
+            function getProcessedUrl(url) {
+                if (isProxyEnabled() && WORKER_PROXY_BASE_URL) {
+                    // 对 M3U/M3U8 链接进行编码，然后通过 Worker 代理
+                    return `${WORKER_PROXY_BASE_URL}?url=${encodeURIComponent(url)}`;
+                }
+                // 返回原始链接 (直链或 Worker 禁用)
+                return url;
+            }
+
+            /**
+             * 获取 M3U 文件内容 (使用或不使用 Worker 代理)
+             */
+            async function fetchM3UContent(rawUrl) {
+                // 先清理 URL，防止双重代理
+                const cleanUrl = cleanInputUrl(rawUrl);
+                
+                // 根据开关决定最终请求的 URL
+                const finalUrl = getProcessedUrl(cleanUrl);
+                
+                const proxyMessage = isProxyEnabled() ? '通过 Worker 代理' : '直连';
+                updateStatus(`正在${proxyMessage}加载 M3U 列表: ${cleanUrl.substring(0, 50)}...`, 'info');
+
+                try {
+                    const response = await fetch(finalUrl);
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`网络错误或源站超时: ${response.status} ${response.statusText}. 响应: ${errorText}`);
+                    }
+
+                    const text = await response.text();
+                    updateStatus('M3U 列表加载成功，正在解析。', 'success');
+                    return { content: text, baseUrl: cleanUrl }; // 返回原始 M3U 链接作为解析相对路径的基准
+
+                } catch (error) {
+                    if (error.message.includes('522') && isProxyEnabled()) {
+                         updateStatus('错误 (522): Worker 递归调用或连接超时。请尝试关闭 Worker 代理。', 'error');
+                    } else if (error.message.includes('CORS')) {
+                         updateStatus('错误 (CORS): 无法获取 M3U 内容。请尝试开启 Worker 代理。', 'error');
+                    } else {
+                         updateStatus(`加载 M3U 失败: ${error.message}`, 'error');
+                    }
+                    console.error('Fetch M3U Error:', error);
+                    return null;
+                }
+            }
+
+            /**
+             * 解析 M3U 文件内容
+             */
+            function parseM3U(content) {
+                // ... (解析逻辑不变)
+                const lines = content.split('\n');
+                const channels = [];
+                let currentChannel = {};
+
+                for (const line of lines) {
+                    if (line.startsWith('#EXTINF:')) {
+                        const match = line.match(/,(.+)$/);
+                        if (match && match[1]) {
+                            currentChannel.name = match[1].trim();
+                        }
+                    } else if (line.trim().length > 0 && !line.startsWith('#')) {
+                        currentChannel.url = line.trim();
+                        if (currentChannel.name && currentChannel.url) {
+                            channels.push({ ...currentChannel });
+                        }
+                        currentChannel = {}; 
+                    }
+                }
+                return channels;
+            }
+
+            /**
+             * 渲染频道列表
+             */
+            function renderChannels(channels) {
+                // ... (渲染逻辑不变)
+                channelListUl.innerHTML = '';
+                channels.forEach((channel, index) => {
+                    const li = document.createElement('li');
+                    const a = document.createElement('a');
+                    a.href = '#';
+                    a.textContent = channel.name;
+                    a.setAttribute('data-url', channel.url);
+                    a.setAttribute('data-name', channel.name);
+                    a.onclick = (e) => {
+                        e.preventDefault();
+                        playChannel(channel.url, channel.name, index);
+                        
+                        document.querySelectorAll('#channels li a').forEach(el => {
+                            el.classList.remove('active');
+                        });
+                        a.classList.add('active');
+                        
+                        // 保存当前播放的流的原始 URL (用于恢复会话)
+                        localStorage.setItem('currentStreamUrl', channel.url);
+                    };
+                    li.appendChild(a);
+                    li.classList.add('rounded-lg');
+                    channelListUl.appendChild(li);
+                });
+            }
+
+            /**
+             * 播放指定的频道 (使用或不使用 Worker 代理)
+             */
+            function playChannel(rawUrl, name, index) {
+                player.pause(); 
+                
+                // ⭐ 核心：根据 Worker 开关决定播放 URL ⭐
+                // 如果启用了 Worker， getProcessedUrl 会返回代理链接，由 Worker 解决 CORS 和相对路径
+                // 如果禁用 Worker， getProcessedUrl 会返回原始链接
+                const url = getProcessedUrl(rawUrl); 
+
+                const proxyStatus = isProxyEnabled() ? ' (通过 Worker)' : ' (直连)';
+                updateStatus(`频道播放中: ${name}${proxyStatus}`, 'success');
+
+                // Hls.js 播放逻辑 (推荐使用 Hls.js 以获取更好的兼容性)
+                if (Hls.isSupported()) {
+                    // 必须先销毁旧的 Hls.js 实例
+                    if (player.hls) {
+                        player.hls.destroy();
+                    }
+                    
+                    const hls = new Hls();
+                    player.hls = hls; // 存储实例以便后续销毁
+                    
+                    hls.loadSource(url);
+                    hls.attachMedia(videoElement);
+
+                    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                        player.play().catch(e => {
+                            player.muted(false); // 取消静音后重试
+                            player.play().catch(err => {
+                                console.log("Player autplay blocked:", err);
+                                updateStatus(`播放失败: ${name} (需要用户手动点击播放)`, 'error');
+                            });
+                        });
+                    });
+                    hls.on(Hls.Events.ERROR, function (event, data) {
+                        if (data.fatal) {
+                            // ... 错误处理逻辑 (不变)
+                            updateStatus(`播放错误: ${name}. ${data.reason} (${isProxyEnabled() ? 'Proxy On' : 'Proxy Off'})`, 'error');
+                        }
+                    });
+                } 
+                // Video.js 原生/浏览器原生 HLS 逻辑 (适用于 Safari/Edge)
+                else if (videoElement.canPlayType('application/vnd.apple.mpegurl') || videoElement.canPlayType('application/x-mpegURL')) {
+                    player.src({
+                        src: url,
+                        type: 'application/x-mpegURL'
+                    });
+                    player.load();
+                    player.play().catch(e => console.log("Player autplay blocked:", e));
+                } 
+                // 都不支持
+                else {
+                    updateStatus('错误: 您的浏览器不支持 HLS/M3U8 流播放。', 'error');
+                }
+            }
+
+            // ==========================================================
+            // 事件监听器
+            // ==========================================================
+
+            // 1. 加载 M3U 列表
+            loadButton.addEventListener('click', async () => {
+                const m3uInput = iptvUrlInput.value.trim();
+                if (!m3uInput) {
+                    updateStatus('请输入 M3U 订阅链接！', 'error');
+                    return;
+                }
+
+                // 保存用户输入的 URL (清理后的)
+                const m3uUrl = cleanInputUrl(m3uInput);
+                localStorage.setItem('iptvUrl', m3uUrl);
+                localStorage.removeItem('currentStreamUrl'); // 清除直链模式记录
+                localStorage.setItem('useProxy', isProxyEnabled()); // 记录代理开关状态
+
+                const m3uResult = await fetchM3UContent(m3uUrl);
+                
+                if (m3uResult) {
+                    const channels = parseM3U(m3uResult.content);
+                    renderChannels(channels);
+                    
+                    if (channels.length > 0) {
+                        // 默认播放第一个频道
+                        setTimeout(() => {
+                            document.querySelector('#channels li a')?.click();
+                        }, 50); 
+                    } else {
+                         updateStatus('M3U 文件已加载，但未找到任何频道。', 'error');
+                    }
                 }
             });
-            
-            // 加载示例频道
-            loadSampleChannels();
-        });
-        
-        // 加载流媒体
-        function loadStream() {
-            let m3uUrl = iptvUrlInput.value.trim();
-            
-            if (!m3uUrl) {
-                updateStatus('请输入 M3U8 链接', 'error');
-                return;
-            }
-            
-            // 清理 URL (防止双重代理)
-            m3uUrl = cleanInputUrl(m3uUrl);
-            
-            // 如果启用了代理，处理 URL
-            if (isProxyEnabled) {
-                const proxyBase = proxyUrlInput.value.trim();
-                if (!proxyBase) {
-                    updateStatus('请先设置代理地址', 'error');
+
+            // 2. 直链播放
+            directPlayButton.addEventListener('click', () => {
+                const streamUrl = iptvUrlInput.value.trim();
+                if (!streamUrl) {
+                    updateStatus('请输入有效的流地址进行直链播放！', 'error');
                     return;
                 }
                 
-                // 确保代理地址格式正确
-                let proxyUrl = proxyBase;
-                if (!proxyUrl.endsWith('/')) {
-                    proxyUrl += '/';
-                }
-                proxyUrl += '?url=' + encodeURIComponent(m3uUrl);
-                m3uUrl = proxyUrl;
-            }
-            
-            updateStatus('正在加载流媒体...', 'loading');
-            
-            // 销毁之前的实例
-            destroyPlayer();
-            
-            // 重新初始化 HLS
-            if (Hls.isSupported()) {
-                hls = new Hls({
-                    maxBufferLength: 30,
-                    maxMaxBufferLength: 600,
-                    maxBufferSize: 60 * 1000 * 1000,
-                    maxBufferHole: 5.0,
-                    enableWorker: true,
-                });
+                // 清空频道列表
+                channelListUl.innerHTML = `<p class="p-2 text-gray-500">当前为直链播放模式。</p>`;
                 
-                hls.loadSource(m3uUrl);
-                hls.attachMedia(videoPlayer);
-                
-                hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                    updateStatus('流媒体加载成功', 'success');
-                    if (autoPlaySwitch.checked) {
-                        videoPlayer.play().catch(e => {
-                            updateStatus('自动播放被阻止: ' + e.message, 'error');
-                        });
-                    }
-                });
-            } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
-                // 原生 HLS 支持
-                videoPlayer.src = m3uUrl;
-                videoPlayer.addEventListener('loadedmetadata', function() {
-                    updateStatus('流媒体加载成功', 'success');
-                    if (autoPlaySwitch.checked) {
-                        videoPlayer.play().catch(e => {
-                            updateStatus('自动播放被阻止: ' + e.message, 'error');
-                        });
-                    }
-                });
-            }
-            
-            // 保存到历史记录
-            saveToHistory(m3uUrl);
-        }
-        
-        // 清理输入 URL (防止双重代理)
-        function cleanInputUrl(url) {
-            if (!url) return url;
-            
-            // 如果未启用代理，直接返回
-            if (!isProxyEnabled) {
-                return url;
-            }
-            
-            try {
-                // 检查是否已经是代理 URL
-                const proxyPatterns = [
-                    'm3u.521986.xyz',
-                    proxyUrlInput.value.trim(),
-                    '?url=',
-                    '%3Furl%3D'
-                ];
-                
-                const isProxyUrl = proxyPatterns.some(pattern => url.includes(pattern));
-                
-                if (isProxyUrl) {
-                    console.log("检测到代理链接，提取原始URL");
-                    
-                    let currentUrl = url;
-                    let depth = 0;
-                    const maxDepth = 5;
-                    
-                    // 递归提取原始URL
-                    while (depth < maxDepth) {
-                        try {
-                            const urlObj = new URL(currentUrl);
-                            
-                            // 如果包含url参数，提取并解码
-                            if (urlObj.searchParams.has('url')) {
-                                const extractedUrl = urlObj.searchParams.get('url');
-                                if (extractedUrl) {
-                                    currentUrl = decodeURIComponent(extractedUrl);
-                                    depth++;
-                                    console.log(`第${depth}层提取: ${currentUrl}`);
-                                    
-                                    // 检查是否还需要继续提取
-                                    const stillProxy = proxyPatterns.some(pattern => 
-                                        currentUrl.includes(pattern)
-                                    );
-                                    if (!stillProxy) {
-                                        break;
-                                    }
-                                    continue;
-                                }
-                            }
-                            break;
-                            
-                        } catch (e) {
-                            // 不是有效URL，直接返回
-                            break;
-                        }
-                    }
-                    
-                    console.log(`最终提取的原始URL: ${currentUrl}`);
-                    return currentUrl;
-                }
-                
-            } catch (e) {
-                console.error("清理URL时出错:", e);
-            }
-            
-            return url;
-        }
-        
-        // 切换代理状态
-        function toggleProxy() {
-            isProxyEnabled = !isProxyEnabled;
-            toggleProxyBtn.textContent = isProxyEnabled ? '禁用代理' : '启用代理';
-            toggleProxyBtn.classList.toggle('btn-secondary', !isProxyEnabled);
-            toggleProxyBtn.classList.toggle('btn-success', isProxyEnabled);
-            
-            // 保存设置
-            saveSettings();
-            
-            updateStatus(`代理已 ${isProxyEnabled ? '启用' : '禁用'}`, 'success');
-        }
-        
-        // 加载示例频道
-        function loadSampleChannels() {
-            const samples = [
-                { name: "CCTV-1 HD", url: "https://cctvcnch5c.v.wscdns.com/live/cctv1_2/YD-8M.m3u8" },
-                { name: "CCTV-6 HD", url: "https://cctvcnch5c.v.wscdns.com/live/cctv6_2/YD-8M.m3u8" },
-                { name: "湖南卫视 HD", url: "https://hw-m.cztv.com/channels/lantian/channel001/720p.m3u8" },
-                { name: "浙江卫视 HD", url: "https://hw-m.cztv.com/channels/lantian/channel002/720p.m3u8" },
-                { name: "东方卫视 HD", url: "http://ivi.bupt.edu.cn/hls/dftv.m3u8" },
-                { name: "北京卫视 HD", url: "http://ivi.bupt.edu.cn/hls/btv1.m3u8" }
-            ];
-            
-            channelList.innerHTML = '';
-            samples.forEach(channel => {
-                const btn = document.createElement('button');
-                btn.className = 'btn btn-outline-secondary w-100 mb-2';
-                btn.textContent = channel.name;
-                btn.onclick = function() {
-                    iptvUrlInput.value = channel.url;
-                    loadStream();
-                };
-                channelList.appendChild(btn);
+                // 保存当前直链 URL 和代理状态
+                localStorage.setItem('iptvUrl', streamUrl); // 统一使用 iptvUrl 存储上次使用的 URL
+                localStorage.setItem('currentStreamUrl', streamUrl); // 记录当前播放的流
+                localStorage.setItem('useProxy', isProxyEnabled()); // 记录代理开关状态
+
+                const streamName = `直链流 (${streamUrl.substring(0, 40)}...)`;
+
+                playChannel(streamUrl, streamName);
             });
-        }
-        
-        // 更新状态信息
-        function updateStatus(message, type) {
-            statusMessage.textContent = message;
-            statusMessage.className = 'status-box ' + type;
-            statusMessage.style.display = 'block';
             
-            // 3秒后自动隐藏
-            if (type !== 'loading') {
-                setTimeout(() => {
-                    statusMessage.style.display = 'none';
-                }, 3000);
-            }
-        }
-        
-        // 销毁播放器
-        function destroyPlayer() {
-            if (hls) {
-                hls.destroy();
-            }
-            videoPlayer.removeAttribute('src');
-            videoPlayer.load();
-        }
-        
-        // 保存设置到 localStorage
-        function saveSettings() {
-            localStorage.setItem('proxyEnabled', isProxyEnabled);
-            localStorage.setItem('proxyUrl', proxyUrlInput.value);
-            localStorage.setItem('autoPlay', autoPlaySwitch.checked);
-        }
-        
-        // 从 localStorage 加载设置
-        function loadSettings() {
-            isProxyEnabled = localStorage.getItem('proxyEnabled') === 'true';
-            proxyUrlInput.value = localStorage.getItem('proxyUrl') || '';
-            autoPlaySwitch.checked = localStorage.getItem('autoPlay') !== 'false';
-            
-            // 更新按钮状态
-            toggleProxyBtn.textContent = isProxyEnabled ? '禁用代理' : '启用代理';
-            toggleProxyBtn.classList.toggle('btn-secondary', !isProxyEnabled);
-            toggleProxyBtn.classList.toggle('btn-success', isProxyEnabled);
-        }
-        
-        // 保存历史记录
-        function saveToHistory(url) {
-            let history = JSON.parse(localStorage.getItem('playHistory') || '[]');
-            
-            // 避免重复
-            if (!history.includes(url)) {
-                history.unshift(url);
+            // 3. 初始加载逻辑
+            const storedUrl = localStorage.getItem('iptvUrl');
+            const storedStreamUrl = localStorage.getItem('currentStreamUrl');
+            const storedProxy = localStorage.getItem('useProxy') === 'true';
+
+            // 恢复代理开关状态
+            useProxyCheckbox.checked = storedProxy;
+
+            if (storedUrl) {
+                iptvUrlInput.value = storedUrl;
+                updateStatus('检测到上次会话记录，正在加载...', 'info');
                 
-                // 最多保存10条记录
-                if (history.length > 10) {
-                    history.pop();
+                // 检查是 M3U 列表模式还是直链模式
+                if (storedStreamUrl && storedUrl === storedStreamUrl) {
+                    // 如果上次是直链播放，恢复直链模式
+                    directPlayButton.click();
+                } else {
+                    // 如果上次是 M3U 列表模式，恢复 M3U 列表模式
+                    loadButton.click(); 
                 }
-                
-                localStorage.setItem('playHistory', JSON.stringify(history));
+            } else {
+                 updateStatus('请输入 M3U 订阅链接或流地址。', 'info');
             }
-        }
+        });
     </script>
 </body>
 </html>
+
+
+
