@@ -206,60 +206,79 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {string} name - 频道名称
      * @param {number} [sourceIndex] - 源序号 (可选，用于显示)
      */
-    function playChannel(url, name, sourceIndex = 0) {
-        let display_name = `${name}`;
-        if (sourceIndex > 0) {
-            display_name += ` (源 ${sourceIndex + 1})`;
-        }
-        
-        updateStatus(`正在播放: ${display_name}`, 'info');
+// app.js (只修改 playChannel 函数及其相关配置)
 
-        // 停止并清理旧的 HLS 实例
-        if (player.hls) {
-            player.hls.destroy();
-            player.hls = null;
-        }
+/**
+ * 播放指定的频道流
+ * @param {string} url - 频道流地址 (可能是原始M3U8链接或Worker代理后的链接)
+ * @param {string} name - 频道名称
+ * @param {number} [sourceIndex] - 源序号 (可选，用于显示)
+ */
+function playChannel(url, name, sourceIndex = 0) {
+    let display_name = `${name}`;
+    if (sourceIndex > 0) {
+        display_name += ` (源 ${sourceIndex + 1})`;
+    }
+    
+    updateStatus(`正在播放: ${display_name}`, 'info');
+
+    // 停止并清理旧的 HLS 实例
+    if (player.hls) {
+        player.hls.destroy();
+        player.hls = null;
+    }
+    
+    let proxiedUrl = url;
+    
+    // ⭐ 关键：判断是否需要代理
+    // 只有手动输入的链接（不以 Worker 地址开头）才需要在这里封装代理。
+    if (WORKER_PROXY_BASE_URL && !url.startsWith(WORKER_PROXY_BASE_URL)) {
+         proxiedUrl = WORKER_PROXY_BASE_URL + '?url=' + encodeURIComponent(url);
+    }
+    
+    // 尝试使用 hls.js
+    if (Hls.isSupported()) {
+        // ⭐ 核心修改：增加加载超时时间 (loadDataTimeout) 至 20 秒
+        const hls = new Hls({
+            // Loader 超时配置
+            loader: Hls.DefaultConfig.loader, // 使用默认 Loader
+            // 将加载 M3U8/片段的超时时间延长至 20 秒
+            // 应对 Worker 或源站的慢速响应
+            manifestLoadTimeout: 20000, 
+            levelLoadTimeout: 20000,
+            fragLoadTimeout: 20000,
+            // 解决 Safari/iOS 中可能出现的解码问题
+            safari: true 
+        });
+
+        player.hls = hls; // 存储实例以便后续清理
         
-        let proxiedUrl = url;
-        
-        // ⭐ 关键：判断是否需要代理
-        // 只有手动输入的链接（不以 Worker 地址开头）才需要在这里封装代理。
-        // M3U 列表中的源链接已由 Worker (index.js) 封装。
-        if (WORKER_PROXY_BASE_URL && !url.startsWith(WORKER_PROXY_BASE_URL)) {
-             proxiedUrl = WORKER_PROXY_BASE_URL + '?url=' + encodeURIComponent(url);
-        }
-        
-        // 尝试使用 hls.js (推荐用于跨浏览器兼容性)
-        if (Hls.isSupported()) {
-            const hls = new Hls();
-            player.hls = hls; // 存储实例以便后续清理
-            
-            // 使用代理后的 URL 加载流
-            hls.loadSource(proxiedUrl);
-            hls.attachMedia(videoElement);
-            hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                player.play().catch(e => console.log("Player autplay blocked:", e));
-                updateStatus(`频道播放中: ${display_name}`, 'success');
-            });
-            hls.on(Hls.Events.ERROR, function(event, data) {
-                if (data.fatal) {
-                     updateStatus(`播放错误 (${display_name}): 无法加载流或片段。请检查流地址是否有效。`, 'error');
-                    console.error('HLS Fatal Error:', data);
-                }
-            });
-        } 
-        // 苹果等原生支持 HLS 的设备
-        else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
-            videoElement.src = proxiedUrl;
-            player.load();
+        // 使用代理后的 URL 加载流
+        hls.loadSource(proxiedUrl);
+        hls.attachMedia(videoElement);
+        hls.on(Hls.Events.MANIFEST_PARSED, function() {
             player.play().catch(e => console.log("Player autplay blocked:", e));
             updateStatus(`频道播放中: ${display_name}`, 'success');
-        } 
-        // 都不支持
-        else {
-            updateStatus('错误: 您的浏览器不支持 HLS/M3U8 流播放。', 'error');
-        }
+        });
+        hls.on(Hls.Events.ERROR, function(event, data) {
+            if (data.fatal) {
+                 updateStatus(`播放错误 (${display_name}): 无法加载流或片段。请检查流地址是否有效。`, 'error');
+                console.error('HLS Fatal Error:', data);
+            }
+        });
+    } 
+    // 苹果等原生支持 HLS 的设备
+    else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+        videoElement.src = proxiedUrl;
+        player.load();
+        player.play().catch(e => console.log("Player autplay blocked:", e));
+        updateStatus(`频道播放中: ${display_name}`, 'success');
+    } 
+    // 都不支持
+    else {
+        updateStatus('错误: 您的浏览器不支持 HLS/M3U8 流播放。', 'error');
     }
+}
 
     // ==========================================================
     // 事件监听器
@@ -309,4 +328,5 @@ directPlayButton.addEventListener('click', () => {
         localStorage.setItem('iptvUrl', iptvUrlInput.value.trim());
     });
 });
+
 
