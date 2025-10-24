@@ -1,4 +1,4 @@
-// Worker 脚本 - 解决 CORS, HLS 相对路径, 并对防盗链进行强力清理
+// Worker 脚本 - 解决 CORS, HLS 相对路径，并强制内容重写
 
 // 辅助函数：确保所有响应都包含 CORS 头部
 function addCORSHeaders(response) {
@@ -22,7 +22,7 @@ async function handleRequest(request) {
   const WORKER_PROXY_BASE_URL = url.origin + '/'; 
 
   if (!targetUrl) {
-    const errorResponse = new Response('错误: 请提供 M3U 订阅链接或流地址作为 "url" 参数。', { 
+    const errorResponse = new Response('错误 (400): 请提供 M3U 订阅链接或流地址作为 "url" 参数。', { 
         status: 400,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' }
     });
@@ -31,6 +31,7 @@ async function handleRequest(request) {
 
   // 强力清理请求头部，模拟纯净浏览器请求
   const newHeaders = new Headers();
+  // 使用通用的 User-Agent，防止被服务器识别为非浏览器请求
   newHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
 
   try {
@@ -42,31 +43,32 @@ async function handleRequest(request) {
 
     // 检查是否是 M3U/M3U8 文件
     const contentType = response.headers.get('content-type') || '';
-    const isM3U = contentType.includes('application/vnd.apple.mpegurl') || contentType.includes('application/x-mpegURL') || targetUrl.endsWith('.m3u') || targetUrl.includes('iptv.php');
+    const isM3U = contentType.includes('application/vnd.apple.mpegurl') || 
+                  contentType.includes('application/x-mpegURL') || 
+                  contentType.includes('text/plain') || // 有些源会错误返回 text/plain
+                  targetUrl.toLowerCase().endsWith('.m3u8') || 
+                  targetUrl.toLowerCase().endsWith('.m3u') || 
+                  targetUrl.includes('iptv.php');
 
     // M3U/M3U8 内容重写 (Content Rewriting)
-    if (isM3U && !targetUrl.endsWith('.m3u8')) {
-        // ⭐ 优化：仅对 M3U 列表或复杂 IPTV 列表 (如 iptv.php) 进行重写，
-        // 对于单层 M3U8 (如 cctv1hd.m3u8) 或 TS 片段，跳过重写，只添加 CORS。
+    if (isM3U) {
+        // ⭐ 关键修复：所有 M3U/M3U8 文件都需要重写
         
-        // 克隆响应并读取内容
         const responseClone = response.clone();
         let text = await responseClone.text();
         
-        // 修正 M3U8 基准 URL (保留原始逻辑用于需要重写的情况)
+        // 解析基准 URL
         const baseUrlObject = new URL(targetUrl);
-        
-        if (baseUrlObject.hostname === 'php.jdshipin.com' && !baseUrlObject.port) {
-            baseUrlObject.port = '8880';
-        }
         
         // 核心重写函数：将所有链接封装成 Worker 代理格式
         const rewriteLink = (link) => {
+            // 解析相对链接为绝对链接
             const absoluteLink = new URL(link, baseUrlObject.href).href;
+            // 将绝对链接封装进 Worker 的代理格式
             return `${WORKER_PROXY_BASE_URL}?url=${encodeURIComponent(absoluteLink)}`;
         };
 
-        // 遍历所有行并重写：
+        // 遍历所有行并重写：只处理非注释（#）且非空的行
         text = text.split('\n').map(line => {
             const trimmedLine = line.trim();
             // 只重写 URL 行
@@ -90,7 +92,7 @@ async function handleRequest(request) {
         return addCORSHeaders(newResponse);
 
     } else {
-        // 标准代理 (适用于 TS 视频片段或单层 M3U8 文件)
+        // 标准代理 (适用于 TS 视频片段或密钥文件)
         const newResponse = new Response(response.body, response);
         // 添加 CORS 头部并返回
         return addCORSHeaders(newResponse);
