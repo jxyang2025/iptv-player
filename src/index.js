@@ -1,4 +1,5 @@
 // Worker 脚本 - 解决 CORS, HLS 相对路径, 并增强 Header 兼容性
+// ⭐ 关键更新: 阻止 Worker 代理指向自身的链接，修复 522 递归错误。
 
 // 辅助函数：确保所有响应都包含 CORS 头部
 function addCORSHeaders(response) {
@@ -14,7 +15,14 @@ function addCORSHeaders(response) {
 
 // 辅助函数：将 M3U/M3U8 中的链接重写为指向 Worker 代理的链接
 function rewriteLink(link, workerBase, targetUrl) {
-     // 1. 尝试将链接解析为绝对 URL
+    // 1. ⭐ CRUCIAL FIX: 检查链接是否已经指向 Worker 代理本身 ⭐
+    // 如果链接已经是代理格式 (例如: worker.dev/?url=...)，则不进行二次重写
+    if (link.startsWith(workerBase)) {
+        console.log(`Skipping rewrite for already proxied link: ${link}`);
+        return link; 
+    }
+    
+    // 2. 尝试将链接解析为绝对 URL
     let absoluteUrl = link;
     if (!link.startsWith('http')) {
         try {
@@ -26,7 +34,7 @@ function rewriteLink(link, workerBase, targetUrl) {
         }
     }
     
-    // 2. 确保链接是完整的 URL，并进行编码
+    // 3. 确保链接是完整的 URL，并进行编码
     const encodedLink = encodeURIComponent(absoluteUrl);
     return `${workerBase}?url=${encodedLink}`;
 }
@@ -59,13 +67,11 @@ async function handleRequest(request) {
     // 1. 准备请求头部
     const requestHeaders = new Headers(request.headers);
     
-    // ⭐ 关键修复: 移除可能导致 304 (Not Modified) 或 206 (Partial Content) 的头部
-    // 强制 Worker 总是获取最新完整内容，避免处理空响应体引发错误。
+    // 关键修复: 移除可能导致 304/206 的头部，强制 Worker 总是获取最新完整内容
     requestHeaders.delete('If-Modified-Since');
     requestHeaders.delete('If-None-Match');
     
-    // ⭐ 新增: 移除 Range 头部，防止 Worker 在代理 M3U/M3U8 文件时收到 206 导致读取错误。
-    // Range 头部只应由Worker在代理视频片段时（非M3U文件）转发。
+    // 移除 Range 头部，防止 M3U/M3U8 文件收到 206 导致读取错误。
     if (targetUrl.toLowerCase().endsWith('.m3u') || targetUrl.toLowerCase().endsWith('.m3u8') || targetUrl.includes('interface.txt')) {
         requestHeaders.delete('Range');
     }
@@ -98,7 +104,6 @@ async function handleRequest(request) {
         // 如果源站返回非 200 状态 (如 304, 404, 500), 直接转发状态码并添加 CORS 头部
         if (response.status !== 200) {
             console.warn(`Proxying non-200 status (${response.status}) for playlist: ${targetUrl}`);
-            // 确保如果源站返回 304/206/404 等，我们仍然能添加 CORS
             return addCORSHeaders(response); 
         }
 
@@ -106,18 +111,18 @@ async function handleRequest(request) {
         const text = await response.text();
         
         // 逐行解析并重写所有流链接，使其指向 Worker 代理
-        const newText = text.split('\n').map(line => {
+        const rewrittenText = text.split('\n').map(line => {
             const trimmedLine = line.trim();
             // 检查行是否是流链接 (非指令 # 开头)
             if (trimmedLine.length > 0 && !trimmedLine.startsWith('#')) {
-                 // 修正：确保传入了 targetUrl 以便解析相对路径
+                 // 修正：确保传入了 targetUrl 以便解析相对路径，并传入 workerBase 检查递归
                 return rewriteLink(trimmedLine, WORKER_PROXY_BASE_URL, targetUrl);
             }
             return line;
         }).join('\n');
         
         // 创建重写后的响应
-        const newResponse = new Response(newText, {
+        const newResponse = new Response(rewrittenText, {
             status: response.status,
             statusText: response.statusText,
             headers: response.headers
