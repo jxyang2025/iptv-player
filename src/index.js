@@ -1,276 +1,191 @@
-// Worker 脚本 - 解决 CORS, HLS 相对路径, 并增强 Header 兼容性
-// ⭐ 关键修复: 彻底解决递归代理、Mixed Content和双重代理问题
+// worker.js - Cloudflare Worker 代理脚本
+// 功能：代理 M3U8/HLS 流媒体，解决跨域问题，重写 TS 片段 URL
 
-// 辅助函数：确保所有响应都包含 CORS 头部
-function addCORSHeaders(response) {
-    const newResponse = new Response(response.body, response);
-    newResponse.headers.set('Access-Control-Allow-Origin', '*');
-    newResponse.headers.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
-    newResponse.headers.set('Access-Control-Allow-Headers', '*');
-    newResponse.headers.set('Access-Control-Max-Age', '86400');
-    return newResponse;
-}
+// 基本配置
+const DEFAULT_UPSTREAM = 'https://example.com'; // 默认上游，可根据需要修改
+const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
 
-// 辅助函数：自动将 HTTP 转换为 HTTPS
-function ensureHTTPS(url) {
-    try {
-        const urlObj = new URL(url);
-        if (urlObj.protocol === 'http:') {
-            urlObj.protocol = 'https:';
-            return urlObj.toString();
-        }
-    } catch (e) {
-        // URL解析失败，保持原样
-    }
-    return url;
-}
-
-// 辅助函数：检查是否为递归代理链接（增强版）
-function isRecursiveProxyLink(link, workerBase) {
-    if (!link) return false;
-    
-    try {
-        const url = new URL(link);
-        // 检查是否是当前worker的代理链接
-        if (url.origin === new URL(workerBase).origin && url.searchParams.has('url')) {
-            return true;
-        }
-    } catch (e) {
-        // 不是有效URL，检查字符串模式
-    }
-    
-    // 检查常见的代理模式（包括双重编码）
-    const proxyPatterns = [
-        '/?url=', '?url=', '%2F%3Furl%3D', '%3Furl%3D',
-        'worker.dev', 'pages.dev', 'm3u.521986.xyz',
-        'worker-proxy', 'proxy', 'cors-proxy'
-    ];
-    
-    return proxyPatterns.some(pattern => link.includes(pattern));
-}
-
-// 辅助函数：从递归链接中提取原始URL（增强版）
-function extractOriginalUrl(recursiveUrl, workerBase) {
-    try {
-        let currentUrl = recursiveUrl;
-        let depth = 0;
-        const maxDepth = 3; // 防止无限循环
-        
-        while (depth < maxDepth) {
-            try {
-                const urlObj = new URL(currentUrl);
-                
-                // 如果当前URL不是代理格式，返回它
-                if (!urlObj.searchParams.has('url')) {
-                    return ensureHTTPS(currentUrl);
-                }
-                
-                const extractedUrl = urlObj.searchParams.get('url');
-                if (!extractedUrl) break;
-                
-                // 解码URL
-                currentUrl = decodeURIComponent(extractedUrl);
-                depth++;
-                
-                // 如果提取后的URL仍然是代理链接，继续提取
-                if (isRecursiveProxyLink(currentUrl, workerBase)) {
-                    continue;
-                }
-                
-                break;
-                
-            } catch (e) {
-                // 不是有效URL，返回确保HTTPS的版本
-                return ensureHTTPS(currentUrl);
-            }
-        }
-        
-        return ensureHTTPS(currentUrl);
-        
-    } catch (e) {
-        return ensureHTTPS(recursiveUrl);
-    }
-}
-
-// 辅助函数：将 M3U/M3U8 中的链接重写为指向 Worker 代理的链接
-function rewriteLink(link, workerBase, targetUrl) {
-    // 1. 跳过空行和注释
-    if (!link || link.startsWith('#') || link.trim() === '') {
-        return link;
-    }
-    
-    // 2. ⭐ 关键修复: 检查是否为递归代理链接 ⭐
-    if (isRecursiveProxyLink(link, workerBase)) {
-        // 如果是递归链接，尝试提取原始URL
-        const originalUrl = extractOriginalUrl(link, workerBase);
-        console.log(`Extracted original URL from recursive link: ${originalUrl}`);
-        return ensureHTTPS(originalUrl);
-    }
-    
-    // 3. 检查链接是否为媒体文件（TS、MP4等），不重写非M3U8链接
-    const mediaExtensions = ['.ts', '.mp4', '.m4s', '.aac', '.mp3', '.webm', '.mkv'];
-    const isMediaFile = mediaExtensions.some(ext => 
-        link.toLowerCase().includes(ext) && !link.toLowerCase().includes('.m3u8')
-    );
-    
-    if (isMediaFile) {
-        return ensureHTTPS(link); // 不重写媒体文件链接，但确保HTTPS
-    }
-    
-    // 4. 尝试将链接解析为绝对 URL
-    let absoluteUrl = link;
-    try {
-        const base = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
-        absoluteUrl = new URL(link, base).toString();
-    } catch (e) {
-        // 保持原样，但确保HTTPS
-        return ensureHTTPS(link);
-    }
-    
-    // 5. 再次检查是否为递归链接（转换后）
-    if (isRecursiveProxyLink(absoluteUrl, workerBase)) {
-        const originalUrl = extractOriginalUrl(absoluteUrl, workerBase);
-        return ensureHTTPS(originalUrl);
-    }
-    
-    // 6. 只重写M3U8相关的链接
-    const isM3U8Link = absoluteUrl.includes('.m3u8') || absoluteUrl.includes('.m3u');
-    if (!isM3U8Link) {
-        return ensureHTTPS(absoluteUrl); // 不重写非M3U8链接，但确保HTTPS
-    }
-    
-    // 7. 重写为 Worker 代理链接（确保使用HTTPS）
-    const secureUrl = ensureHTTPS(absoluteUrl);
-    const newLink = `${workerBase}?url=${encodeURIComponent(secureUrl)}`;
-    return newLink;
-}
-
-addEventListener('fetch', event => {
-    event.respondWith(handleRequest(event.request));
-});
-
+// 主处理函数
 async function handleRequest(request) {
     // 处理 CORS Preflight (OPTIONS) 请求
     if (request.method === 'OPTIONS') {
-        return addCORSHeaders(new Response(null, { status: 200 }));
+        return new Response(null, {
+            status: 204,
+            headers: CORS_HEADERS,
+        });
     }
-    
+
     const url = new URL(request.url);
     let targetUrl = url.searchParams.get('url');
-    
-    // 使用请求的 URL origin 作为 Worker 代理的基地址
-    const WORKER_PROXY_BASE_URL = url.origin + '/';
 
+    // 如果没有提供 url 参数，返回使用说明
     if (!targetUrl) {
-        const errorResponse = new Response('错误: 请提供 M3U 订阅链接或流地址作为 "url" 参数。', { 
-            status: 400,
-            headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-        });
-        return addCORSHeaders(errorResponse);
+        return new Response(
+            'Usage: /?url=<encoded_url>\nExample: /?url=https%3A%2F%2Fexample.com%2Fstream.m3u8',
+            { status: 400, headers: { 'Content-Type': 'text/plain' } }
+        );
     }
 
-    // ⭐ 关键修复: 自动将目标 URL 的 HTTP 转换为 HTTPS ⭐
-    targetUrl = ensureHTTPS(targetUrl);
-    
-    // ⭐ 关键修复: 检查目标URL是否是递归代理链接 ⭐
-    if (isRecursiveProxyLink(targetUrl, WORKER_PROXY_BASE_URL)) {
-        const originalUrl = extractOriginalUrl(targetUrl, WORKER_PROXY_BASE_URL);
-        targetUrl = originalUrl;
-        console.log(`Detected recursive proxy request. Redirecting to original URL: ${targetUrl}`);
-    }
-    
-    // 清理请求头部
-    const headers = new Headers();
-    headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-    headers.set('Accept', '*/*');
-    headers.set('Accept-Language', 'en-US,en;q=0.5');
-    
-    // 添加 Referer 和 Origin 头
-    try {
-        const targetUrlObj = new URL(targetUrl);
-        headers.set('Referer', targetUrlObj.origin);
-        headers.set('Origin', targetUrlObj.origin);
-    } catch (e) {
-        // 忽略URL解析错误
-    }
+    // 解码 URL 参数
+    targetUrl = decodeURIComponent(targetUrl);
 
-    try {
-        // 核心代理请求
-        const response = await fetch(targetUrl, {
-            method: 'GET',
-            headers: headers,
-            redirect: 'follow'
-        });
-
-        const responseContentType = response.headers.get('content-type') || '';
-        
-        // 检查内容是否为 M3U/M3U8（只处理文本类型的M3U8文件）
-        const isM3U8Content = (responseContentType.includes('application/vnd.apple.mpegurl') || 
-                              responseContentType.includes('application/x-mpegURL') || 
-                              responseContentType.includes('audio/mpegurl')) &&
-                              !responseContentType.includes('video') &&
-                              !responseContentType.includes('audio');
-        
-        const isM3U8Extension = targetUrl.includes('.m3u8') || targetUrl.includes('.m3u');
-        const isSmallTextFile = response.headers.get('Content-Length') < 100000 && // 增大文件大小限制
-                               (responseContentType.includes('text/plain') || 
-                                responseContentType.includes('application/'));
-
-        if ((isM3U8Content || isM3U8Extension) && isSmallTextFile) {
-            // 如果 M3U8 索引文件本身获取失败，直接返回错误状态
-            if (!response.ok) {
-                const errorResponse = new Response(`上游服务器错误: ${response.status} ${response.statusText}`, {
-                    status: response.status,
-                    headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-                });
-                return addCORSHeaders(errorResponse);
+    // ⭐ 防止递归调用检查 ⭐
+    const recursivePatterns = [
+        'm3u.521986.xyz',
+        url.hostname, // 当前 Worker 域名
+        '?url=',
+        '%3Furl%3D'
+    ];
+    
+    const isRecursive = recursivePatterns.some(pattern => 
+        targetUrl.includes(pattern)
+    );
+    
+    if (isRecursive) {
+        return new Response(
+            '错误: 检测到递归代理调用，请检查输入的URL。', 
+            { 
+                status: 400, 
+                headers: { 
+                    'Content-Type': 'text/plain',
+                    ...CORS_HEADERS 
+                } 
             }
+        );
+    }
 
-            // 获取文本内容
-            const text = await response.text();
-            
-            // 使用 rewriteLink 辅助函数重写所有非注释行中的链接
-            const rewrittenText = text.split('\n').map(line => {
-                const trimmedLine = line.trim();
-                if (trimmedLine && !trimmedLine.startsWith('#')) {
-                    return rewriteLink(trimmedLine, WORKER_PROXY_BASE_URL, targetUrl);
-                }
-                return line;
-            }).join('\n');
-            
-            // 创建重写后的响应
-            const newResponse = new Response(rewrittenText, {
-                status: response.status,
-                statusText: response.statusText,
-                headers: response.headers
-            });
-
-            // 设置正确的 MIME 类型
-            newResponse.headers.set('Content-Type', 'application/vnd.apple.mpegurl');
-            
-            // 添加 CORS 头部并返回
-            return addCORSHeaders(newResponse);
-
-        } else {
-            // 处理媒体文件和其他内容（MP4、TS等）
-            const newHeaders = new Headers(response.headers);
-            newHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-            
-            const newResponse = new Response(response.body, {
-                status: response.status,
-                statusText: response.statusText,
-                headers: newHeaders
-            });
-            
-            return addCORSHeaders(newResponse);
+    try {
+        // 处理 M3U8 文件
+        if (targetUrl.endsWith('.m3u8')) {
+            return handleM3U8Request(targetUrl, request, url);
         }
-
-    } catch (e) {
-        // 代理请求失败
-        const errorBody = `代理请求失败: ${e.message || '网络错误'}`;
-        return addCORSHeaders(new Response(errorBody, {
+        
+        // 处理 TS 片段或其他资源
+        return handleMediaRequest(targetUrl, request);
+        
+    } catch (error) {
+        return new Response(`Worker Error: ${error.message}`, {
             status: 500,
-            headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-        }));
+            headers: { 'Content-Type': 'text/plain', ...CORS_HEADERS },
+        });
     }
 }
+
+// 处理 M3U8 清单文件
+async function handleM3U8Request(targetUrl, originalRequest, workerUrl) {
+    // 获取原始 M3U8 内容
+    const response = await fetch(targetUrl, {
+        headers: getForwardHeaders(originalRequest.headers),
+    });
+
+    if (!response.ok) {
+        return response;
+    }
+
+    let m3uContent = await response.text();
+
+    // 重写 M3U8 内容中的 URL
+    m3uContent = rewriteM3U8Content(m3uContent, targetUrl, workerUrl);
+
+    return new Response(m3uContent, {
+        status: response.status,
+        headers: {
+            'Content-Type': 'application/vnd.apple.mpegurl',
+            ...CORS_HEADERS,
+            ...getCacheHeaders(response.headers),
+        },
+    });
+}
+
+// 重写 M3U8 内容
+function rewriteM3U8Content(content, originalUrl, workerUrl) {
+    const baseUrl = new URL(originalUrl);
+    baseUrl.pathname = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
+
+    return content.split('\n').map(line => {
+        // 跳过注释和空行
+        if (line.startsWith('#') || line.trim() === '') {
+            return line;
+        }
+
+        // 处理相对路径
+        if (!line.startsWith('http')) {
+            try {
+                line = new URL(line, baseUrl).toString();
+            } catch (e) {
+                console.warn(`无法解析相对路径: ${line}`);
+                return line;
+            }
+        }
+
+        // 将 TS 片段 URL 通过 Worker 代理
+        if (line.endsWith('.ts') || line.includes('.ts?')) {
+            return `${workerUrl.origin}/?url=${encodeURIComponent(line)}`;
+        }
+
+        // 处理嵌套的 M3U8
+        if (line.endsWith('.m3u8')) {
+            return `${workerUrl.origin}/?url=${encodeURIComponent(line)}`;
+        }
+
+        return line;
+    }).join('\n');
+}
+
+// 处理媒体请求（TS 片段等）
+async function handleMediaRequest(targetUrl, originalRequest) {
+    const response = await fetch(targetUrl, {
+        headers: getForwardHeaders(originalRequest.headers),
+    });
+
+    if (!response.ok) {
+        return response;
+    }
+
+    return new Response(response.body, {
+        status: response.status,
+        headers: {
+            'Content-Type': response.headers.get('Content-Type') || 'video/mp2t',
+            ...CORS_HEADERS,
+            ...getCacheHeaders(response.headers),
+        },
+    });
+}
+
+// 获取转发头（可选）
+function getForwardHeaders(originalHeaders) {
+    const headers = new Headers();
+    
+    // 可以添加需要转发的头，例如 Referer
+    const referer = originalHeaders.get('Referer');
+    if (referer) {
+        headers.set('Referer', referer);
+    }
+    
+    return headers;
+}
+
+// 获取缓存头（可选）
+function getCacheHeaders(originalHeaders) {
+    const headers = {};
+    
+    // 从原始响应中复制缓存头
+    const cacheControl = originalHeaders.get('Cache-Control');
+    if (cacheControl) {
+        headers['Cache-Control'] = cacheControl;
+    } else {
+        // 默认缓存 5 分钟
+        headers['Cache-Control'] = 'public, max-age=300';
+    }
+    
+    return headers;
+}
+
+// Worker 入口
+addEventListener('fetch', event => {
+    event.respondWith(handleRequest(event.request));
+});
