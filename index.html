@@ -211,29 +211,56 @@
             /**
              * ⭐ 核心修复：清理用户输入的 URL，防止双重代理 ⭐
              */
-            function cleanInputUrl(url) {
-                // 仅在启用 Worker 时才执行清理逻辑
-                if (!isProxyEnabled()) {
-                    return url;
-                }
+/**
+ * ⭐ 核心修复：清理用户输入的 URL，防止双重代理 ⭐
+ */
+function cleanInputUrl(url) {
+    // 如果未启用 Worker 代理，直接返回
+    if (!isProxyEnabled()) {
+        return url;
+    }
 
-                try {
-                    // 检查输入的 URL 是否已经指向 Worker 代理
-                    if (url.startsWith(WORKER_PROXY_BASE_URL)) {
-                        console.log("Input is already a worker proxy URL. Attempting to extract original URL.");
-                        const u = new URL(url);
-                        const originalUrl = u.searchParams.get('url');
-                        
-                        if (originalUrl) {
-                            // 确保解码后的 URL 被返回
-                            return decodeURIComponent(originalUrl);
+    try {
+        // 检查输入的 URL 是否已经指向 Worker 代理
+        if (url.startsWith(WORKER_PROXY_BASE_URL)) {
+            console.log("Input is already a worker proxy URL. Attempting to extract original URL.");
+            const u = new URL(url);
+            let originalUrl = u.searchParams.get('url');
+            
+            if (originalUrl) {
+                // 处理双重编码的情况
+                while (originalUrl.includes('%3Furl%3D') || originalUrl.includes('?url=')) {
+                    try {
+                        const tempUrl = new URL(originalUrl);
+                        if (tempUrl.searchParams.has('url')) {
+                            originalUrl = tempUrl.searchParams.get('url');
+                        } else {
+                            break;
                         }
+                    } catch (e) {
+                        break;
                     }
-                } catch (e) {
-                    console.error("Error cleaning input URL:", e);
                 }
-                return url;
+                
+                // 确保解码后的 URL 被返回
+                return decodeURIComponent(originalUrl);
             }
+        }
+        
+        // 检查是否是其他worker的代理链接
+        if (url.includes('?url=') && url !== WORKER_PROXY_BASE_URL) {
+            console.log("Input contains proxy pattern, extracting original URL.");
+            const urlObj = new URL(url);
+            const originalUrl = urlObj.searchParams.get('url');
+            if (originalUrl) {
+                return decodeURIComponent(originalUrl);
+            }
+        }
+    } catch (e) {
+        console.error("Error cleaning input URL:", e);
+    }
+    return url;
+}
 
             /**
              * 将原始 URL 转换为 Worker 代理 URL 或返回原始 URL (取决于开关)
@@ -483,5 +510,6 @@
     </script>
 </body>
 </html>
+
 
 
