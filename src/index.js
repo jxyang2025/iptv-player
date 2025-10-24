@@ -1,5 +1,5 @@
 // Worker 脚本 - 解决 CORS, HLS 相对路径, 并增强 Header 兼容性
-// ⭐ 关键修复: 彻底解决递归代理问题和文件类型检测问题
+// ⭐ 关键修复: 彻底解决递归代理、Mixed Content和双重代理问题
 
 // 辅助函数：确保所有响应都包含 CORS 头部
 function addCORSHeaders(response) {
@@ -11,56 +11,66 @@ function addCORSHeaders(response) {
     return newResponse;
 }
 
-// 辅助函数：检查是否为递归代理链接
-function isRecursiveProxyLink(link, workerBase) {
+// 辅助函数：自动将 HTTP 转换为 HTTPS
+function ensureHTTPS(url) {
     try {
-        const url = new URL(link);
-        // 检查是否是当前worker的代理链接
-        if (url.origin === new URL(workerBase).origin && url.searchParams.has('url')) {
-            return true;
-        }
-        // 检查是否是其他worker的代理链接（包含双重编码）
-        if (link.includes('/?url=') || link.includes('%2F%3Furl%3D') || link.includes('?url=')) {
-            return true;
+        const urlObj = new URL(url);
+        if (urlObj.protocol === 'http:') {
+            urlObj.protocol = 'https:';
+            return urlObj.toString();
         }
     } catch (e) {
-        // 不是有效URL，检查字符串模式
-        if (link.includes('?url=') || link.includes('%3Furl%3D')) {
-            return true;
-        }
+        // URL解析失败，保持原样
     }
-    return false;
+    return url;
 }
 
-// 辅助函数：从递归链接中提取原始URL
-function extractOriginalUrl(recursiveUrl) {
+// 辅助函数：检查是否为递归代理链接（增强版）
+function isRecursiveProxyLink(link, workerBase) {
+    if (!link) return false;
+    
+    // 检查是否包含代理模式
+    const proxyPatterns = [
+        '/?url=', '?url=', '%2F%3Furl%3D', '%3Furl%3D',
+        'worker.dev', 'pages.dev', 'm3u.521986.xyz'
+    ];
+    
+    return proxyPatterns.some(pattern => link.includes(pattern));
+}
+
+// 辅助函数：从递归链接中提取原始URL（增强版）
+function extractOriginalUrl(recursiveUrl, workerBase) {
     try {
-        const url = new URL(recursiveUrl);
-        let originalUrl = url.searchParams.get('url');
+        let currentUrl = recursiveUrl;
+        let depth = 0;
+        const maxDepth = 5; // 防止无限循环
         
-        // 处理双重编码的情况
-        if (originalUrl && originalUrl.includes('%3Furl%3D')) {
-            // 尝试多次解码直到得到原始URL
-            let decodedUrl = originalUrl;
-            while (decodedUrl.includes('%3Furl%3D') || decodedUrl.includes('?url=')) {
-                try {
-                    const tempUrl = new URL(decodedUrl);
-                    if (tempUrl.searchParams.has('url')) {
-                        decodedUrl = tempUrl.searchParams.get('url');
-                    } else {
-                        break;
-                    }
-                } catch (e) {
-                    // 解码失败，使用最后一次成功解码的结果
-                    break;
+        while (depth < maxDepth) {
+            try {
+                const urlObj = new URL(currentUrl);
+                
+                // 如果当前URL不是代理格式，返回它
+                if (!urlObj.searchParams.has('url')) {
+                    return ensureHTTPS(currentUrl);
                 }
+                
+                const extractedUrl = urlObj.searchParams.get('url');
+                if (!extractedUrl) break;
+                
+                // 解码URL
+                currentUrl = decodeURIComponent(extractedUrl);
+                depth++;
+                
+            } catch (e) {
+                // 不是有效URL，返回确保HTTPS的版本
+                return ensureHTTPS(currentUrl);
             }
-            originalUrl = decodedUrl;
         }
         
-        return originalUrl ? decodeURIComponent(originalUrl) : recursiveUrl;
+        return ensureHTTPS(currentUrl);
+        
     } catch (e) {
-        return recursiveUrl;
+        return ensureHTTPS(recursiveUrl);
     }
 }
 
@@ -74,16 +84,18 @@ function rewriteLink(link, workerBase, targetUrl) {
     // 2. ⭐ 关键修复: 检查是否为递归代理链接 ⭐
     if (isRecursiveProxyLink(link, workerBase)) {
         // 如果是递归链接，尝试提取原始URL
-        const originalUrl = extractOriginalUrl(link);
-        return originalUrl;
+        const originalUrl = extractOriginalUrl(link, workerBase);
+        return ensureHTTPS(originalUrl);
     }
     
     // 3. 检查链接是否为媒体文件（TS、MP4等），不重写非M3U8链接
     const mediaExtensions = ['.ts', '.mp4', '.m4s', '.aac', '.mp3', '.webm', '.mkv'];
-    const isMediaFile = mediaExtensions.some(ext => link.toLowerCase().includes(ext));
+    const isMediaFile = mediaExtensions.some(ext => 
+        link.toLowerCase().includes(ext) && !link.toLowerCase().includes('.m3u8')
+    );
     
     if (isMediaFile) {
-        return link; // 不重写媒体文件链接
+        return ensureHTTPS(link); // 不重写媒体文件链接，但确保HTTPS
     }
     
     // 4. 尝试将链接解析为绝对 URL
@@ -92,24 +104,25 @@ function rewriteLink(link, workerBase, targetUrl) {
         const base = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
         absoluteUrl = new URL(link, base).toString();
     } catch (e) {
-        // 保持原样
-        return link;
+        // 保持原样，但确保HTTPS
+        return ensureHTTPS(link);
     }
     
     // 5. 再次检查是否为递归链接（转换后）
     if (isRecursiveProxyLink(absoluteUrl, workerBase)) {
-        const originalUrl = extractOriginalUrl(absoluteUrl);
-        return originalUrl;
+        const originalUrl = extractOriginalUrl(absoluteUrl, workerBase);
+        return ensureHTTPS(originalUrl);
     }
     
     // 6. 只重写M3U8相关的链接
     const isM3U8Link = absoluteUrl.includes('.m3u8') || absoluteUrl.includes('.m3u');
     if (!isM3U8Link) {
-        return absoluteUrl; // 不重写非M3U8链接
+        return ensureHTTPS(absoluteUrl); // 不重写非M3U8链接，但确保HTTPS
     }
     
-    // 7. 重写为 Worker 代理链接
-    const newLink = `${workerBase}?url=${encodeURIComponent(absoluteUrl)}`;
+    // 7. 重写为 Worker 代理链接（确保使用HTTPS）
+    const secureUrl = ensureHTTPS(absoluteUrl);
+    const newLink = `${workerBase}?url=${encodeURIComponent(secureUrl)}`;
     return newLink;
 }
 
@@ -137,6 +150,9 @@ async function handleRequest(request) {
         return addCORSHeaders(errorResponse);
     }
 
+    // ⭐ 关键修复: 自动将目标 URL 的 HTTP 转换为 HTTPS ⭐
+    targetUrl = ensureHTTPS(targetUrl);
+    
     // 清理请求头部
     const headers = new Headers();
     headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
@@ -170,13 +186,14 @@ async function handleRequest(request) {
                               !responseContentType.includes('audio');
         
         const isM3U8Extension = targetUrl.includes('.m3u8') || targetUrl.includes('.m3u');
-        const isSmallTextFile = response.headers.get('Content-Length') < 10000 && 
-                               responseContentType.includes('text/plain');
+        const isSmallTextFile = response.headers.get('Content-Length') < 100000 && // 增大文件大小限制
+                               (responseContentType.includes('text/plain') || 
+                                responseContentType.includes('application/'));
 
         if ((isM3U8Content || isM3U8Extension) && isSmallTextFile) {
             // 如果 M3U8 索引文件本身获取失败，直接返回错误状态
             if (!response.ok) {
-                const errorResponse = new Response(`上游服务器错误: ${response.status}`, {
+                const errorResponse = new Response(`上游服务器错误: ${response.status} ${response.statusText}`, {
                     status: response.status,
                     headers: { 'Content-Type': 'text/plain; charset=utf-8' }
                 });
