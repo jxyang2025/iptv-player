@@ -30,17 +30,21 @@ async function handleRequest(request) {
 
   // ⭐ 关键修复：清理和设置请求头部，以提高对目标服务器的兼容性
   const newHeaders = new Headers(request.headers);
+  
   // 1. 设置通用的 User-Agent，防止被服务器拒绝
   newHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-  // 2. 移除可能导致问题的头部，如 Referer（在 HLS 片段加载时可能不正确）
-  newHeaders.delete('Referer'); 
+  
+  // 2. ⭐ 核心修复：设置 Referer 头部为目标 URL 本身，以通过源站的防盗链安全检查。
+  //    注意：这里不再是删除 Referer，而是强制设置为 targetUrl。
+  newHeaders.set('Referer', targetUrl); 
+  
   // 3. 移除 Host 头部，fetch 会根据目标 URL 自动设置正确的主机名和端口
   newHeaders.delete('Host');
 
   try {
     // 代理请求
     const response = await fetch(targetUrl, {
-      headers: newHeaders, // 使用清理后的头部
+      headers: newHeaders, // 使用修正后的头部
       redirect: 'follow'
     });
 
@@ -57,7 +61,7 @@ async function handleRequest(request) {
         // 修正 M3U8 基准 URL
         const baseUrlObject = new URL(targetUrl);
         
-        // ⭐ 关键修复：当 M3U8 URL缺少端口时，强制修复为 8880
+        // 关键修复：当 M3U8 URL缺少端口时，强制修复为 8880
         if (baseUrlObject.hostname === 'php.jdshipin.com' && !baseUrlObject.port) {
             baseUrlObject.port = '8880';
         }
