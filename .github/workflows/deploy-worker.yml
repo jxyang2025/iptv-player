@@ -1,0 +1,23 @@
+name: Deploy Cloudflare Worker
+
+on:
+  push:
+    branches:
+      - main  # 监听 main 分支的推送
+    paths:
+      - 'src/index.js' # 仅当 index.js 变化时触发
+      - 'wrangler.toml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cloudflare Worker 部署操作
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: deploy --minify
