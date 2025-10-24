@@ -1,37 +1,213 @@
-<div>
-    <input type="text" id="iptv-url" placeholder="输入 M3U 订阅链接">
-    <button id="load-playlist">加载列表</button>
-</div>
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloudflare Pages IPTV 播放器</title>
+    <link href="https://vjs.zencdn.net/8.5.2/video-js.css" rel="stylesheet" />
+    <link href="style.css" rel="stylesheet" />
+    <style>
+        /* ------------------------------------------------ */
+        /* 以下是新增的用于频道列表和源聚合的CSS样式，请复制到您的 style.css 文件中 */
+        /* ------------------------------------------------ */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+            color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
 
-<div style="margin-top: 10px;">
-    <input type="text" id="direct-url" placeholder="输入 M3U8/HLS 链接直接播放">
-    <button id="direct-play">直接播放</button>
-</div>
+        header {
+            background-color: #282828;
+            padding: 15px 20px;
+            border-bottom: 2px solid #333;
+        }
 
-<ul id="channels">
-    </ul>
+        #input-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
 
-<style>
-/* 示例 CSS 样式，用于源切换列表 */
-.source-list {
-    list-style: none;
-    padding-left: 20px;
-    margin: 0;
-    display: none; /* 默认隐藏 */
-}
-.source-list.visible {
-    display: block; /* 点击主链接后显示 */
-}
-.channel-group {
-    border-bottom: 1px solid #333;
-    padding: 5px 0;
-}
-.main-channel-link.active {
-    font-weight: bold;
-    color: #4CAF50; /* 播放中的频道高亮 */
-}
-.source-list a {
-    font-size: 0.9em;
-    color: #999;
-}
-</style>
+        #input-controls input[type="url"],
+        #input-controls button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        #input-controls input[type="url"] {
+            flex-grow: 1;
+            background-color: #383838;
+            color: #f0f0f0;
+            border: 1px solid #444;
+            min-width: 250px;
+        }
+
+        #input-controls button {
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            transition: background-color 0.3s;
+        }
+
+        #input-controls button:hover {
+            background-color: #45a049;
+        }
+
+        #status-message {
+            margin-left: 15px;
+            font-weight: bold;
+        }
+
+        #app-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        #channel-list {
+            width: 300px; /* 列表宽度 */
+            background-color: #222;
+            padding: 10px;
+            overflow-y: auto;
+            border-right: 1px solid #333;
+        }
+
+        #channel-list h2 {
+            font-size: 1.2em;
+            margin-top: 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+
+        #channels {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .channel-group {
+            border-bottom: 1px solid #333;
+            padding: 5px 0;
+            cursor: pointer;
+        }
+        
+        /* 聚合后的主频道链接样式 */
+        .main-channel-link {
+            display: block;
+            padding: 8px 10px;
+            color: #f0f0f0;
+            text-decoration: none;
+            transition: background-color 0.2s;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+
+        .main-channel-link:hover {
+            background-color: #383838;
+        }
+
+        .main-channel-link.active {
+            background-color: #555;
+            color: #4CAF50; 
+        }
+
+        /* 源切换列表 */
+        .source-list {
+            list-style: none;
+            padding-left: 10px;
+            margin: 5px 0 5px 0;
+            display: none; /* 默认隐藏 */
+            background-color: #1e1e1e;
+            border-left: 3px solid #4CAF50;
+        }
+        
+        .source-list.visible {
+            display: block; /* 展开显示 */
+        }
+        
+        .source-list li a {
+            display: block;
+            padding: 5px 10px;
+            text-decoration: none;
+            color: #aaa;
+            font-size: 0.9em;
+        }
+
+        .source-list li a:hover {
+            background-color: #282828;
+            color: white;
+        }
+
+        #player-container {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: black;
+        }
+        
+        #tv-player {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* 媒体查询：在小屏幕上隐藏频道列表，使其更容易在手机上使用 */
+        @media (max-width: 768px) {
+            #app-container {
+                flex-direction: column;
+            }
+            #channel-list {
+                width: 100%;
+                max-height: 40vh; /* 限制列表高度 */
+                border-bottom: 1px solid #333;
+                border-right: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Cloudflare IPTV 播放器</h1>
+        <div id="input-controls">
+            <input type="url" id="iptv-url" placeholder="输入 M3U 订阅链接" value="" />
+            <button id="load-playlist">加载列表</button>
+            
+            <input type="url" id="direct-url" placeholder="输入 M3U8/HLS 链接直接播放" />
+            <button id="direct-play">直接播放</button>
+            
+            <span id="status-message"></span>
+        </div>
+    </header>
+
+    <main id="app-container">
+        <aside id="channel-list">
+            <h2>频道列表</h2>
+            <ul id="channels">
+                <p>请先输入 M3U 链接并点击加载。</p>
+            </ul>
+        </aside>
+
+        <section id="player-container">
+            <video id="tv-player" class="video-js vjs-default-skin" controls preload="auto" width="100%" height="auto" poster="">
+                <p class="vjs-no-js">
+                    要查看此视频，请启用 JavaScript，并考虑升级到支持 HTML5 视频的 Web 浏览器。
+                </p>
+            </video>
+        </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
+    <script src="https://vjs.zencdn.net/8.5.2/video.min.js"></script>
+    <script src="app.js"></script>
+
+</body>
+</html>
