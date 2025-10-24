@@ -12,8 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // !!! 关键配置: Cloudflare Worker 代理地址 !!!
     // ==========================================================
     // 确保这里是您的 Worker 的 HTTPS 地址，末尾包含斜杠 "/"。
-    // 它用于解决 CORS 和混合内容问题。
-    const WORKER_PROXY_BASE_URL = 'https://m3u-proxy.jxy5460.workers.dev/'; 
+    const WORKER_PROXY_BASE_URL = 'https://m3u-proxy.jxy5460.workers.dev/'; //
 
     /**
      * 更新状态信息
@@ -133,7 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /**
      * 播放指定的频道流
-     * @param {string} url - 频道流地址 (通常是 M3U8/HLS)
+     * @param {string} url - 频道流地址 (此时应为Worker代理后的URL)
      * @param {string} name - 频道名称
      */
     function playChannel(url, name) {
@@ -145,13 +144,9 @@ document.addEventListener('DOMContentLoaded', () => {
             player.hls = null;
         }
         
-        let proxiedUrl = url;
-        
-        if (WORKER_PROXY_BASE_URL) {
-            // ⭐ 2. 关键：对 HLS 视频流 URL 使用 Worker 代理
-            // 解决混合内容和 CORS 问题，并确保 Worker 接收到正确的 '?url=' 参数
-            proxiedUrl = WORKER_PROXY_BASE_URL + '?url=' + encodeURIComponent(url);
-        }
+        // ⭐ 关键修改：直接使用 url 作为播放源 (proxiedUrl)，
+        // 因为 Worker 在重写 M3U 内容时已将其封装为代理 URL。
+        const proxiedUrl = url; 
         
         // 尝试使用 hls.js (推荐用于跨浏览器兼容性)
         if (Hls.isSupported()) {
