@@ -28,26 +28,24 @@ async function handleRequest(request) {
     return addCORSHeaders(errorResponse);
   }
 
-  // ⭐ 关键修复：清理和设置请求头部，以提高对目标服务器的兼容性
+  // ⭐ 关键修复：清理和设置请求头部
   const newHeaders = new Headers(request.headers);
   
-  // 1. 设置通用的 User-Agent，防止被服务器拒绝
+  // 1. 设置通用的 User-Agent，防止被服务器识别为非浏览器请求
   newHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
   
-  // 2. ⭐ 核心修复：设置 Referer 头部为目标 URL 本身，以通过源站的防盗链安全检查。
-  //    注意：这里不再是删除 Referer，而是强制设置为 targetUrl。
-  newHeaders.set('Referer', targetUrl); 
-  
-  // 3. 移除 Host 头部，fetch 会根据目标 URL 自动设置正确的主机名和端口
+  // 2. 移除所有可能触发防盗链或泄露代理身份的头部
+  newHeaders.delete('Referer'); 
+  newHeaders.delete('Origin'); // ⭐ 新增：删除 Origin 头部是解决代理问题的关键步骤之一
   newHeaders.delete('Host');
 
   try {
     // 代理请求
     const response = await fetch(targetUrl, {
-      headers: newHeaders, // 使用修正后的头部
+      headers: newHeaders, // 使用清理后的头部
       redirect: 'follow'
     });
-
+    
     // 检查是否是 M3U/M3U8 文件
     const contentType = response.headers.get('content-type') || '';
     const isM3U = contentType.includes('application/vnd.apple.mpegurl') || contentType.includes('application/x-mpegURL') || targetUrl.endsWith('.m3u') || targetUrl.includes('iptv.php');
