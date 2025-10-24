@@ -280,22 +280,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     // ⭐ 新增：直接播放按钮的事件监听器
-    directPlayButton.addEventListener('click', () => {
-        const directUrl = directUrlInput.value.trim();
-        if (!directUrl) {
-            updateStatus('请输入要直接播放的源地址！', 'error');
-            return;
-        }
-        // 直接播放，名称使用 URL 的一部分作为显示名称
-        let name = directUrl.substring(directUrl.lastIndexOf('/') + 1);
-        if (name.includes('?')) {
-             name = name.substring(0, name.indexOf('?'));
-        }
-        playChannel(directUrl, `手动源: ${name}`, 1);
-        
-        // 清除列表高亮
-        document.querySelectorAll('.main-channel-link').forEach(a => a.classList.remove('active'));
-    });
+// ⭐ app.js 中的 directPlayButton.addEventListener 修正:
+directPlayButton.addEventListener('click', () => {
+    const directUrl = directUrlInput.value.trim();
+    if (!directUrl) {
+        updateStatus('请输入要直接播放的源地址！', 'error');
+        return;
+    }
+    // 直接播放，名称使用 URL 的一部分作为显示名称
+    let name = directUrl.substring(directUrl.lastIndexOf('/') + 1);
+    if (name.includes('?')) {
+         name = name.substring(0, name.indexOf('?'));
+    }
+    // 播放手动源，不传递 sourceIndex，让它显示为不带 (源 x) 的名称
+    playChannel(directUrl, `手动源: ${name}`); 
+    
+    // 清除列表高亮
+    document.querySelectorAll('.main-channel-link').forEach(a => a.classList.remove('active'));
+});
 
     // 从本地存储加载 URL (可选优化)
     const storedUrl = localStorage.getItem('iptvUrl');
@@ -307,3 +309,4 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem('iptvUrl', iptvUrlInput.value.trim());
     });
 });
+
