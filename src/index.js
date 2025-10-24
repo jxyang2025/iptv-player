@@ -16,9 +16,8 @@ addEventListener('fetch', event => {
 })
 
 async function handleRequest(request) {
-  // ⭐ 关键修复：处理 CORS Preflight (OPTIONS) 请求 ⭐
+  // ⭐ 处理 CORS Preflight (OPTIONS) 请求 ⭐
   if (request.method === 'OPTIONS') {
-    // OPTIONS请求不需要代理目标资源，直接返回200 OK状态和CORS头部即可
     return addCORSHeaders(new Response(null, { status: 200 }));
   }
   
@@ -34,20 +33,34 @@ async function handleRequest(request) {
     return addCORSHeaders(errorResponse);
   }
 
-  // ⭐ 关键修复：清理和设置请求头部，以解决部分源站对请求头的严格要求 ⭐
-  // 移除可能引起问题的头部，并设置一个常见的User-Agent
+  // ⭐ 优化：清理和设置请求头部，以增强对源站的兼容性 ⭐
   const newHeaders = new Headers(request.headers);
-  newHeaders.delete('host'); // 移除host，fetch会自动设置
+  newHeaders.delete('host'); // 移除host
+  newHeaders.delete('accept-encoding'); // 移除编码，防止Worker/源站编码不匹配
+
+  // 伪造标准浏览器头部
   newHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36');
   newHeaders.set('Referer', new URL(targetUrl).origin + '/'); // 伪造 Referer
   
+  let response;
   try {
-    const response = await fetch(targetUrl, {
+    response = await fetch(targetUrl, {
       method: request.method,
       headers: newHeaders,
       redirect: 'follow',
       body: request.body
     });
+
+    // ⭐ 关键检查：如果源站返回 4xx/5xx 错误，Worker 应该直接返回这个错误，而不是继续解析 ⭐
+    if (!response.ok) {
+        // 如果原始请求失败（例如 403 Forbidden 或 404 Not Found），我们返回一个包含详细信息的响应
+        const errorBody = `代理请求失败：源站返回状态码 ${response.status} ${response.statusText}。\n\n提示：此错误通常意味着您使用的视频链接已过期或被源站拒绝。`;
+        const errorResponse = new Response(errorBody, { 
+            status: 502, // 使用 502 Bad Gateway 表示代理下游错误
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+        });
+        return addCORSHeaders(errorResponse);
+    }
 
     // 辅助函数：重写 M3U8 中的相对链接为绝对链接，并使用 Worker 代理
     function rewriteLink(link) {
@@ -106,8 +119,9 @@ async function handleRequest(request) {
     }
 
   } catch (e) {
-    // 代理请求失败：返回 500 错误
-    const errorResponse = new Response(`代理请求目标 URL 失败: ${e.message}`, { status: 500 });
+    // 代理请求失败：返回 504 Gateway Timeout (更贴切) 或 500
+    // 此处捕获的是网络级错误（如 DNS 失败、超时）
+    const errorResponse = new Response(`代理请求目标 URL 失败（网络级错误）：${e.message}`, { status: 504 });
     return addCORSHeaders(errorResponse);
   }
 }
