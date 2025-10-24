@@ -29,10 +29,21 @@ function ensureHTTPS(url) {
 function isRecursiveProxyLink(link, workerBase) {
     if (!link) return false;
     
-    // 检查是否包含代理模式
+    try {
+        const url = new URL(link);
+        // 检查是否是当前worker的代理链接
+        if (url.origin === new URL(workerBase).origin && url.searchParams.has('url')) {
+            return true;
+        }
+    } catch (e) {
+        // 不是有效URL，检查字符串模式
+    }
+    
+    // 检查常见的代理模式（包括双重编码）
     const proxyPatterns = [
         '/?url=', '?url=', '%2F%3Furl%3D', '%3Furl%3D',
-        'worker.dev', 'pages.dev', 'm3u.521986.xyz'
+        'worker.dev', 'pages.dev', 'm3u.521986.xyz',
+        'worker-proxy', 'proxy', 'cors-proxy'
     ];
     
     return proxyPatterns.some(pattern => link.includes(pattern));
@@ -43,7 +54,7 @@ function extractOriginalUrl(recursiveUrl, workerBase) {
     try {
         let currentUrl = recursiveUrl;
         let depth = 0;
-        const maxDepth = 5; // 防止无限循环
+        const maxDepth = 3; // 防止无限循环
         
         while (depth < maxDepth) {
             try {
@@ -60,6 +71,13 @@ function extractOriginalUrl(recursiveUrl, workerBase) {
                 // 解码URL
                 currentUrl = decodeURIComponent(extractedUrl);
                 depth++;
+                
+                // 如果提取后的URL仍然是代理链接，继续提取
+                if (isRecursiveProxyLink(currentUrl, workerBase)) {
+                    continue;
+                }
+                
+                break;
                 
             } catch (e) {
                 // 不是有效URL，返回确保HTTPS的版本
@@ -85,6 +103,7 @@ function rewriteLink(link, workerBase, targetUrl) {
     if (isRecursiveProxyLink(link, workerBase)) {
         // 如果是递归链接，尝试提取原始URL
         const originalUrl = extractOriginalUrl(link, workerBase);
+        console.log(`Extracted original URL from recursive link: ${originalUrl}`);
         return ensureHTTPS(originalUrl);
     }
     
@@ -152,6 +171,13 @@ async function handleRequest(request) {
 
     // ⭐ 关键修复: 自动将目标 URL 的 HTTP 转换为 HTTPS ⭐
     targetUrl = ensureHTTPS(targetUrl);
+    
+    // ⭐ 关键修复: 检查目标URL是否是递归代理链接 ⭐
+    if (isRecursiveProxyLink(targetUrl, WORKER_PROXY_BASE_URL)) {
+        const originalUrl = extractOriginalUrl(targetUrl, WORKER_PROXY_BASE_URL);
+        targetUrl = originalUrl;
+        console.log(`Detected recursive proxy request. Redirecting to original URL: ${targetUrl}`);
+    }
     
     // 清理请求头部
     const headers = new Headers();
