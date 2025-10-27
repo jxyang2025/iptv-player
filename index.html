@@ -10,7 +10,7 @@
     <style>
         body {
             background-color: #000000;
-            color: #e0e0e0;
+            color: #000000;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
         .container {
@@ -84,12 +84,37 @@
         }
         .source-item {
             font-size: 0.9em;
-            color: #aaa;
+            color: #FFF;
             margin-left: 10px;
         }
         .source-item.active {
             color: #03dac6;
             font-weight: bold;
+        }
+        .debug-panel {
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            background-color: #FFFFFF;
+            border: 1px solid #333;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .debug-entry {
+            margin-bottom: 5px;
+            padding: 3px;
+            border-left: 3px solid transparent;
+        }
+        .debug-entry.info { border-left-color: #2196F3; }
+        .debug-entry.warning { border-left-color: #FF9800; }
+        .debug-entry.error { border-left-color: #F44336; }
+        .debug-entry.success { border-left-color: #4CAF50; }
+        .debug-timestamp {
+            color: #888;
+            font-size: 10px;
+            margin-right: 10px;
         }
         footer {
             text-align: center;
@@ -108,7 +133,6 @@
             background: #444;
             border-radius: 4px;
         }
-        /* 配色调整 */
         .bg-dark-custom {
             background-color: #121212 !important;
         }
@@ -117,50 +141,6 @@
         }
         .border-secondary-custom {
             border-color: #455a64 !important;
-        }
-        /* 调试面板样式 */
-        .debug-panel {
-            max-height: 300px;
-            overflow-y: auto;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            background-color: #0a0a0a;
-            border: 1px solid #333;
-            padding: 10px;
-            border-radius: 4px;
-            margin-top: 10px;
-        }
-        .debug-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .debug-entry {
-            margin-bottom: 5px;
-            padding: 3px 5px;
-            border-radius: 3px;
-            border-left: 3px solid transparent;
-        }
-        .debug-entry.info {
-            border-left-color: #2196F3;
-        }
-        .debug-entry.warning {
-            border-left-color: #FF9800;
-        }
-        .debug-entry.error {
-            border-left-color: #F44336;
-        }
-        .debug-entry.success {
-            border-left-color: #4CAF50;
-        }
-        .debug-timestamp {
-            color: #888;
-            font-size: 10px;
-            margin-right: 10px;
-        }
-        .badge {
-            font-size: 0.7em;
         }
     </style>
 </head>
@@ -190,8 +170,8 @@
                         <label for="corsProxy" class="form-label text-secondary-custom">CORS 代理设置</label>
                         <select class="form-select" id="corsProxy">
                             <option value="">不使用代理</option>
-                            <option value="http://localhost:3000/proxy?url=" selected>本地代理 (修复版)</option>
-                            <option value="http://localhost:3000/?url=">本地代理 (旧版)</option>
+                            <option value="http://localhost:3000/proxy?url=" selected>本地代理 (/proxy路径)</option>
+                            <option value="http://localhost:3000/?url=">本地代理 (根路径)</option>
                             <option value="https://m3u.521986.xyz/?url=">默认代理: m3u.521986.xyz</option>
                             <option value="https://cors-anywhere.herokuapp.com/">Heroku Proxy</option>
                             <option value="https://proxy.scrapping.do/">scrapping.do</option>
@@ -228,24 +208,13 @@
     
     <!-- 调试面板 -->
     <div class="card mt-4 border-secondary-custom">
-        <div class="card-header">
-            <div class="debug-header">
-                <span><i class="bi bi-bug"></i> 调试面板</span>
-                <div>
-                    <button class="btn btn-sm btn-outline-light" onclick="toggleDebugPanel()">
-                        <i class="bi bi-chevron-down" id="debugToggleIcon"></i> 切换显示
-                    </button>
-                    <button class="btn btn-sm btn-outline-light" onclick="clearDebugLog()">
-                        <i class="bi bi-trash"></i> 清空日志
-                    </button>
-                    <button class="btn btn-sm btn-outline-light" onclick="testProxyConnection()">
-                        <i class="bi bi-plug"></i> 测试代理
-                    </button>
-                </div>
-            </div>
-        </div>
-        <div class="card-body" id="debugPanel">
+        <div class="card-header">调试信息</div>
+        <div class="card-body">
             <div class="debug-panel" id="debugLog"></div>
+            <div class="mt-2">
+                <button class="btn btn-sm btn-outline-light" onclick="clearDebugLog()">清空日志</button>
+                <button class="btn btn-sm btn-outline-light" onclick="testProxyConnection()">测试代理连接</button>
+            </div>
         </div>
     </div>
 </div>
@@ -258,7 +227,6 @@
     let hls;
     let allChannels = {};
     let currentChannel = null;
-    let debugPanelVisible = true;
 
     const video = document.getElementById('video');
 
@@ -275,21 +243,6 @@
         debugLog.scrollTop = debugLog.scrollHeight;
         
         console.log(`[${type.toUpperCase()}] ${message}`);
-    }
-
-    function toggleDebugPanel() {
-        const debugPanel = document.getElementById('debugPanel');
-        const debugToggleIcon = document.getElementById('debugToggleIcon');
-        
-        if (debugPanelVisible) {
-            debugPanel.style.display = 'none';
-            debugToggleIcon.className = 'bi bi-chevron-up';
-        } else {
-            debugPanel.style.display = 'block';
-            debugToggleIcon.className = 'bi bi-chevron-down';
-        }
-        
-        debugPanelVisible = !debugPanelVisible;
     }
 
     function clearDebugLog() {
@@ -438,7 +391,7 @@
         }
     }
 
-    // 构建代理URL
+    // 构建代理URL - 关键修复
     function buildProxyUrl(proxy, url) {
         if (!proxy) {
             logDebug('未使用代理，直接返回URL', 'info');
@@ -446,7 +399,7 @@
         }
         
         let finalUrl;
-        if (proxy.endsWith('?url=')) {
+        if (proxy.includes('?url=')) {
             finalUrl = `${proxy}${encodeURIComponent(ensureHTTPS(url))}`;
         } else {
             finalUrl = `${proxy}/${encodeURIComponent(ensureHTTPS(url))}`;
@@ -616,6 +569,10 @@
     document.addEventListener('DOMContentLoaded', function() {
         logDebug('IPTV播放器初始化完成', 'success');
         initHLS();
+        
+        // 自动选择正确的代理路径
+        document.getElementById('corsProxy').value = 'http://localhost:3000/proxy?url=';
+        logDebug('已自动选择正确的代理路径: /proxy', 'success');
     });
 </script>
 
