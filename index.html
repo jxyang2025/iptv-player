@@ -149,7 +149,8 @@
                     <div class="mb-3">
                         <label for="corsProxy" class="form-label text-secondary-custom">CORS 代理设置</label>
                         <select class="form-select" id="corsProxy">
-                            <option value="" selected>不使用代理</option>
+                            <option value="">不使用代理</option>
+                            <option value="http://localhost:3000/proxy">本地代理</option>
                             <option value="https://m3u.521986.xyz/?url=">默认代理: m3u.521986.xyz</option>
                             <option value="https://cors-anywhere.herokuapp.com/">Heroku Proxy</option>
                             <option value="https://proxy.scrapping.do/">scrapping.do</option>
@@ -162,7 +163,7 @@
             <div class="card border-secondary-custom">
                 <div class="card-header">频道列表</div>
                 <div class="card-body channels-panel bg-dark-custom" id="channelList">
-                    <!-- nel 将动态插入 -->
+                    <!-- 频道将动态插入 -->
                     <p class="text-muted">加载订阅或直链后显示频道</p>
                 </div>
             </div>
