@@ -140,11 +140,18 @@
                         <button class="btn btn-primary mt-2 w-100" onclick="loadDirectStream()">播放直链</button>
                     </div>
 
-                    <div class="mb-3">
-                        <label for="m3uSubscription" class="form-label text-secondary-custom">M3U 订阅地址</label>
-                        <input type="text" class="form-control" id="m3uSubscription" placeholder="输入 M3U 订阅链接"/>
-                        <button class="btn btn-primary mt-2 w-100" onclick="loadM3USubscription()">加载订阅</button>
-                    </div>
+                   <!-- 修改这一部分 -->
+<div class="mb-3">
+    <label for="corsProxy" class="form-label text-secondary-custom">CORS 代理设置</label>
+    <select class="form-select" id="corsProxy">
+        <option value="">不使用代理</option>
+        <option value="http://localhost:3000/proxy?url=" selected>本地代理（修复版）</option>
+        <option value="https://m3u.521986.xyz/?url=">默认代理: m3u.521986.xyz</option>
+        <option value="https://cors-anywhere.herokuapp.com/">Heroku Proxy</option>
+        <option value="https://proxy.scrapping.do/">scrapping.do</option>
+        <option value="https://api.allorigins.win/raw?url=">AllOrigins</option>
+    </select>
+</div>
 
                     <div class="mb-3">
                         <label for="corsProxy" class="form-label text-secondary-custom">CORS 代理设置</label>
