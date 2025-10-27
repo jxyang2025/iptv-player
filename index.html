@@ -9,6 +9,7 @@
       font-family: Arial, sans-serif;
       background: #f0f0f0;
       padding: 20px;
+      margin: 0;
     }
     h1 {
       text-align: center;
@@ -53,26 +54,14 @@
     #channelList {
       margin: 10px 0;
       min-height: 40px;
-    }
-    .channel-btn {
-      display: inline-block;
-      margin: 5px 5px 0 0;
-      padding: 8px 12px;
-      background: #007bff;
-      color: white;
-      border-radius: 4px;
-      text-decoration: none;
+      font-family: monospace;
       font-size: 14px;
-    }
-    .channel-btn:hover {
-      background: #0056b3;
-    }
-    video {
-      width: 100%;
-      max-width: 100%;
-      height: auto;
-      border-radius: 8px;
-      margin: 10px 0;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      background: #f8f8f8;
+      padding: 10px;
+      border-radius: 4px;
+      color: #333;
     }
     #debugLog {
       background: #000;
@@ -83,6 +72,9 @@
       font-size: 12px;
       height: 120px;
       overflow-y: auto;
+      margin: 0;
+      white-space: pre-line;
+      line-height: 1.4;
     }
     .footer {
       text-align: center;
@@ -140,9 +132,9 @@
 
       <div class="panel">
         <h3>调试信息</h3>
-        <button onclick="document.getElementById('debugLog').innerHTML = ''">清空日志</button>
+        <button onclick="clearLog()">清空日志</button>
         <button onclick="toggleDebug()">隐藏/显示</button>
-        <div id="debugLog"></div>
+        <pre id="debugLog"></pre>
       </div>
 
     </div>
@@ -164,13 +156,21 @@
 
     function log(msg) {
       const time = new Date().toLocaleTimeString();
-      logArea.innerHTML += `[${time}] ${msg}\n`;
+      logArea.textContent += `[${time}] ${msg}\n`;
       logArea.scrollTop = logArea.scrollHeight;
       console.log(msg);
     }
 
+    function clearLog() {
+      logArea.textContent = '';
+    }
+
     function toggleDebug() {
-      logArea.style.display = logArea.style.display === 'none' ? 'block' : 'none';
+      if (logArea.style.display === 'none') {
+        logArea.style.display = 'block';
+      } else {
+        logArea.style.display = 'none';
+      }
     }
 
     function destroyHLS() {
@@ -181,7 +181,6 @@
       }
     }
 
-    // ✅ 修改1: getProxiedUrl - 本地代理走 /proxy 接口
     function getProxiedUrl(url) {
       const proxy = proxySelect.value;
       const encodedUrl = encodeURIComponent(url);
@@ -199,7 +198,6 @@
       }
     }
 
-    // ✅ 修改2: playUrl - 本地代理时避免重复封装
     function playUrl(url, name = '未知频道') {
       destroyHLS();
       currentChannelEl.textContent = name;
@@ -249,7 +247,6 @@
       }
     }
 
-    // ✅ 修改3: loadM3U - 本地代理使用 /m3u 接口自动重写资源路径
     function loadM3U() {
       const url = document.getElementById('m3uUrl').value.trim();
       if (!url) {
@@ -302,15 +299,10 @@
         }
       }
 
+      // ✅ 改为逐行文本显示，不是按钮
       channelList.innerHTML = '';
-      channels.forEach(ch => {
-        const a = document.createElement('a');
-        a.href = 'javascript:void(0)';
-        a.className = 'channel-btn';
-        a.textContent = ch.name;
-        a.onclick = () => playUrl(ch.url, ch.name);
-        channelList.appendChild(a);
-      });
+      const channelText = channels.map(ch => `${ch.name}: ${ch.url}`).join('\n');
+      channelList.textContent = channelText;
 
       log(`加载完成，共 ${channels.length} 个频道`);
     }
@@ -348,9 +340,7 @@
     }
 
     log('IPTV 播放器已加载');
-    toggleDebug();
+    toggleDebug(); // 默认显示调试信息
   </script>
 </body>
 </html>
-
-
