@@ -225,7 +225,7 @@
 </head>
 <body>
 <div class="container">
-    <h1 class="text-center mb-4">IPTV 高清播放器 - 明亮版</h1>
+    <h1 class="text-center mb-4">IPTV 高清播放器 - 明亮修复版</h1>
 
     <div class="row">
         <!-- 左侧控制区 -->
@@ -241,7 +241,8 @@
 
                     <div class="mb-3">
                         <label for="m3uSubscription" class="form-label">M3U 订阅地址</label>
-                        <input type="text" class="form-control" id="m3uSubscription" placeholder="输入 M3U 订阅链接"/>
+                        <input type="text" class="form-control" id="m3uSubscription" placeholder="输入 M3U 订阅链接" 
+                               value="https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/interface.txt"/>
                         <button class="btn btn-primary mt-2 w-100" onclick="loadM3USubscription()">加载订阅</button>
                     </div>
 
@@ -251,11 +252,11 @@
                             <option value="">不使用代理</option>
                             <option value="http://localhost:3000/proxy?url=" selected>本地代理 (/proxy路径)</option>
                             <option value="http://localhost:3000/?url=">本地代理 (根路径)</option>
-                            <option value="https://m3u.521986.xyz/?url=">默认代理: m3u.521986.xyz</option>
-                            <option value="https://cors-anywhere.herokuapp.com/">Heroku Proxy</option>
-                            <option value="https://proxy.scrapping.do/">scrapping.do</option>
+                            <option value="https://corsproxy.io/?url=">CorsProxy.io</option>
                             <option value="https://api.allorigins.win/raw?url=">AllOrigins</option>
+                            <option value="https://cors-anywhere.herokuapp.com/">Heroku Proxy</option>
                         </select>
+                        <small class="text-muted">如果本地代理返回661错误，请尝试其他代理</small>
                     </div>
                 </div>
             </div>
@@ -285,13 +286,16 @@
             
             <!-- 调试面板 -->
             <div class="card mt-4">
-                <div class="card-header">调试信息</div>
+                <div class="card-header">
+                    调试信息 
+                    <button class="btn btn-sm btn-outline-secondary float-end" onclick="toggleDebugPanel()">隐藏</button>
+                </div>
                 <div class="card-body">
                     <div class="debug-panel" id="debugLog"></div>
                     <div class="mt-2">
                         <button class="btn btn-sm btn-outline-secondary" onclick="clearDebugLog()">清空日志</button>
                         <button class="btn btn-sm btn-outline-secondary" onclick="testProxyConnection()">测试代理连接</button>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="toggleDebugPanel()">切换调试面板</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="testDirectPlay()">测试直连播放</button>
                     </div>
                 </div>
             </div>
@@ -332,9 +336,10 @@
     }
 
     function toggleDebugPanel() {
-        const debugPanel = document.querySelector('.debug-panel').parentElement;
+        const debugPanel = document.querySelector('.debug-panel').parentElement.parentElement;
         debugPanelVisible = !debugPanelVisible;
         debugPanel.style.display = debugPanelVisible ? 'block' : 'none';
+        document.querySelector('.card-header button').textContent = debugPanelVisible ? '隐藏' : '显示';
         logDebug(`调试面板${debugPanelVisible ? '显示' : '隐藏'}`, 'info');
     }
 
@@ -365,6 +370,13 @@
         } catch (error) {
             logDebug(`代理测试错误: ${error.message}`, 'error');
         }
+    }
+
+    // 测试直连播放（绕过代理）
+    function testDirectPlay() {
+        const testUrl = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
+        logDebug(`测试直连播放: ${testUrl}`, 'info');
+        playStream(testUrl, "测试流");
     }
 
     // 初始化 HLS
@@ -459,9 +471,9 @@
                 alert("请求过于频繁，请稍后再试。");
                 return;
             }
-            if (response.status === 521) {
-                logDebug("代理服务器出现问题", 'error');
-                alert("代理服务器出现问题，请更换代理或直接使用链接。");
+            if (response.status === 521 || response.status === 661) {
+                logDebug(`代理服务器返回错误: ${response.status}`, 'error');
+                alert(`代理服务器错误 (${response.status})，请更换代理。`);
                 return;
             }
             if (!response.ok) {
@@ -487,11 +499,16 @@
             return ensureHTTPS(url);
         }
         
+        // 处理URL编码和代理格式
+        const encodedUrl = encodeURIComponent(ensureHTTPS(url));
         let finalUrl;
+        
         if (proxy.includes('?url=')) {
-            finalUrl = `${proxy}${encodeURIComponent(ensureHTTPS(url))}`;
+            finalUrl = `${proxy}${encodedUrl}`;
+        } else if (proxy.endsWith('/')) {
+            finalUrl = `${proxy}${encodedUrl}`;
         } else {
-            finalUrl = `${proxy}/${encodeURIComponent(ensureHTTPS(url))}`;
+            finalUrl = `${proxy}/${encodedUrl}`;
         }
         
         logDebug(`代理构建: ${proxy} + ${url} = ${finalUrl}`, 'info');
@@ -663,8 +680,8 @@
         document.getElementById('corsProxy').value = 'http://localhost:3000/proxy?url=';
         logDebug('已自动选择正确的代理路径: /proxy', 'success');
         
-        // 可选：自动填充测试链接
-        // document.getElementById('m3uSubscription').value = "https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/interface.txt";
+        // 预填充测试订阅
+        logDebug('已预填充测试订阅链接', 'info');
     });
 </script>
 
