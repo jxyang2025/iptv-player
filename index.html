@@ -150,7 +150,7 @@
                         <label for="corsProxy" class="form-label text-secondary-custom">CORS 代理设置</label>
                         <select class="form-select" id="corsProxy">
                             <option value="" selected>不使用代理</option>
-                            <option value="https://m3u.521986.xyz/">默认代理: m3u.521986.xyz</option>
+                            <option value="https://m3u.521986.xyz/?url=">默认代理: m3u.521986.xyz</option>
                             <option value="https://cors-anywhere.herokuapp.com/">Heroku Proxy</option>
                             <option value="https://proxy.scrapping.do/">scrapping.do</option>
                             <option value="https://api.allorigins.win/raw?url=">AllOrigins</option>
@@ -163,7 +163,7 @@
                 <div class="card-header">频道列表</div>
                 <div class="card-body channels-panel bg-dark-custom" id="channelList">
                     <!-- 频道将动态插入 -->
-                    <p class="text-muted" style="color: white;">加载订阅或直链后显示频道</p>
+                    <p class="text-muted">加载订阅或直链后显示频道</p>
                 </div>
             </div>
         </div>
@@ -215,15 +215,15 @@
             if (data.fatal) {
                 switch (data.type) {
                     case Hls.ErrorTypes.NETWORK_ERROR:
-                        console.error("网络错误，尝试恢复...");
+                        console.error("网络错误，尝试恢复...", data.details);
                         hls.startLoad();
                         break;
                     case Hls.ErrorTypes.MEDIA_ERROR:
-                        console.error("媒体错误，尝试恢复...");
+                        console.error("媒体错误，尝试恢复...", data.details);
                         hls.recoverMediaError();
                         break;
                     default:
-                        console.error("无法恢复的错误");
+                        console.error("无法恢复的错误", data.details);
                         hls.destroy();
                         break;
                 }
@@ -241,7 +241,7 @@
             return;
         }
 
-        const finalUrl = ensureHTTPS(proxy ? proxy + url : url);
+        const finalUrl = buildProxyUrl(proxy, url);
         playStream(finalUrl, "直链播放");
     }
 
@@ -255,7 +255,7 @@
             return;
         }
 
-        const finalUrl = ensureHTTPS(proxy ? proxy + subUrl : subUrl);
+        const finalUrl = buildProxyUrl(proxy, subUrl);
 
         try {
             const response = await fetch(finalUrl);
@@ -267,6 +267,15 @@
             console.error("加载订阅失败:", error);
             alert("加载订阅失败，请检查链接或更换代理重试。");
         }
+    }
+
+    // 构建代理URL
+    function buildProxyUrl(proxy, url) {
+        if (!proxy) return ensureHTTPS(url);
+        if (proxy.endsWith('?url=')) {
+            return `${proxy}${encodeURIComponent(ensureHTTPS(url))}`;
+        }
+        return `${proxy}/${encodeURIComponent(ensureHTTPS(url))}`;
     }
 
     // 解析 M3U 内容
@@ -299,7 +308,7 @@
         container.innerHTML = '';
 
         if (Object.keys(allChannels).length === 0) {
-            container.innerHTML = '<p class="text-muted" style="color: white;">未找到频道</p>';
+            container.innerHTML = '<p class="text-muted">未找到频道</p>';
             return;
         }
 
@@ -356,7 +365,7 @@
         const sources = allChannels[currentChannel];
         if (index >= 0 && index < sources.length) {
             const proxy = document.getElementById('corsProxy').value;
-            const url = ensureHTTPS(proxy ? proxy + sources[index].url : sources[index].url);
+            const url = buildProxyUrl(proxy, sources[index].url);
             const label = `${currentChannel} (源${index + 1})`;
             playStream(url, label);
 
@@ -401,6 +410,5 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-
 
 
