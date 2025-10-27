@@ -140,7 +140,13 @@
                         <button class="btn btn-primary mt-2 w-100" onclick="loadDirectStream()">播放直链</button>
                     </div>
 
-                   <!-- 修改这一部分 -->
+                    <div class="mb-3">
+                        <label for="m3uSubscription" class="form-label text-secondary-custom">M3U 订阅地址</label>
+                        <input type="text" class="form-control" id="m3uSubscription" placeholder="输入 M3U 订阅链接"/>
+                        <button class="btn btn-primary mt-2 w-100" onclick="loadM3USubscription()">加载订阅</button>
+                    </div>
+
+<!-- 修改这一部分 -->
 <div class="mb-3">
     <label for="corsProxy" class="form-label text-secondary-custom">CORS 代理设置</label>
     <select class="form-select" id="corsProxy">
@@ -273,7 +279,6 @@
         }
     }
 
-
 // 构建代理URL - 修复版本
 function buildProxyUrl(proxy, url) {
     if (!proxy) return ensureHTTPS(url);
@@ -390,7 +395,7 @@ function buildProxyUrl(proxy, url) {
         }
     }
 
-// 增强的播放流函数，支持更多格式
+  // 增强的播放流函数，支持更多格式
 function playStream(url, label) {
     console.log('开始播放:', url);
     document.getElementById('currentPlayback').textContent = label || "播放中";
@@ -414,23 +419,13 @@ function playStream(url, label) {
     }
 }
 
-    // 构建代理URL - 修复版本
-function buildProxyUrl(proxy, url) {
-    if (!proxy) return ensureHTTPS(url);
-    
-    // 添加调试信息
-    console.log('原始URL:', url);
-    console.log('代理前缀:', proxy);
-    
-    if (proxy.includes('?url=')) {
-        const finalUrl = `${proxy}${encodeURIComponent(ensureHTTPS(url))}`;
-        console.log('构建的代理URL:', finalUrl);
-        return finalUrl;
-    } else {
-        const finalUrl = `${proxy}/${encodeURIComponent(ensureHTTPS(url))}`;
-        console.log('构建的代理URL:', finalUrl);
-        return finalUrl;
-    }
+// HLS 播放函数
+function tryHLSPlayback(url) {
+    initHLS();
+    hls.loadSource(url);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(e => console.error('HLS播放错误:', e));
+    });
 }
 
 // 增强的 ensureHTTPS 函数
@@ -452,24 +447,16 @@ function ensureHTTPS(url) {
         return url;
     }
 }
+
     // 页面初始化
     initHLS();
 
     // 示例：自动填充测试链接
     // document.getElementById('m3u8Url').value = "https://example.com/live/stream.m3u8";
     // document.getElementById('m3uSubscription').value = "https://example.com/playlist.m3u";
-// HLS 播放函数
-function tryHLSPlayback(url) {
-    initHLS();
-    hls.loadSource(url);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(e => console.error('HLS播放错误:', e));
-    });
-}
+
 </script>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-
-
