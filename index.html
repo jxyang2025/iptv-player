@@ -5,6 +5,7 @@
   <title>IPTV 高清播放器 - 明亮版</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
+    /* 保持你原来的样式不变 */
     body { font-family: Arial, sans-serif; background: #f0f0f0; padding: 20px; }
     h1 { text-align: center; color: #333; }
     .panel { background: #fff; border-radius: 8px; padding: 15px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
@@ -93,7 +94,7 @@
       }
     }
 
-    // 根据选择的代理返回处理后的 URL
+    // ✅ 修改1：getProxiedUrl - 本地代理使用 /proxy 接口
     function getProxiedUrl(url) {
       const proxy = proxySelect.value;
       const encodedUrl = encodeURIComponent(url);
@@ -112,13 +113,17 @@
       }
     }
 
-    // 播放指定 URL（自动应用代理）
+    // ✅ 修改2：playUrl - 播放时直接使用原始 URL（因为 /m3u 已重写）
     function playUrl(url, name = '未知频道') {
       destroyHLS();
       currentChannelEl.textContent = name;
-      const finalUrl = proxySelect.value === 'local' ? url : getProxiedUrl(url); // 注意：直链仍走通用代理
 
-      log(`开始播放: ${name} (源1)`);
+      // 只有直链才走代理封装；订阅加载时 URL 已是代理地址
+      const finalUrl = proxySelect.value === 'local' && !url.includes('/proxy?url=') 
+        ? getProxiedUrl(url) 
+        : url;
+
+      log(`开始播放: ${name}`);
       log(`播放URL: ${finalUrl}`);
 
       if (Hls.isSupported()) {
@@ -137,7 +142,7 @@
           log(`[ERROR] HLS错误: ${data.type} - ${data.details}`);
           if (data.fatal) {
             if (data.type === 'networkError') {
-              log('[WARNING] 网络错误，尝试恢复..');
+              log('[WARNING] 网络错误，尝试恢复...');
               hls.startLoad();
             } else if (data.type === 'mediaError') {
               hls.recoverMediaError();
@@ -159,7 +164,54 @@
       }
     }
 
-    // 解析 M3U 内容（简化版）
+    // ✅ 修改3：loadM3U - 本地代理使用 /m3u 接口，其他代理保持原逻辑
+    function loadM3U() {
+      const url = document.getElementById('m3uUrl').value.trim();
+      if (!url) {
+        alert('请输入M3U地址');
+        return;
+      }
+
+      let fetchUrl;
+      if (proxySelect.value === 'local') {
+        // 使用 /m3u 接口自动重写所有资源为 /proxy?url=...
+        fetchUrl = `http://localhost:3000/m3u?url=${encodeURIComponent(url)}`;
+        log(`[INFO] 使用本地代理加载订阅: ${fetchUrl}`);
+      } else {
+        fetchUrl = getProxiedUrl(url);
+        log(`[INFO] 使用通用代理加载: ${fetchUrl}`);
+      }
+
+      // ✅ 修复：正确处理 fetch 错误，避免误报“代理未运行”
+      fetch(fetchUrl)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return proxySelect.value === 'local' 
+            ? response.text() 
+            : response.json().then(data => data.contents);
+        })
+        .then(content => {
+          const m3uText = proxySelect.value === 'local' 
+            ? content 
+            : decodeURIComponent(content);
+          parseM3U(m3uText);
+        })
+        .catch(error => {
+          // ✅ 区分网络错误和代理未运行
+          if (error.name === 'TypeError' || error.message.includes('fetch')) {
+            // 网络连接问题
+            testLocalProxy(); // 自动测试
+            log(`[ERROR] 网络错误: ${error.message}`);
+            alert('网络请求失败，请检查代理服务是否运行且允许跨域');
+          } else {
+            log(`[ERROR] 加载失败: ${error.message}`);
+            alert(`加载失败: ${error.message}`);
+          }
+        });
+    }
+
     function parseM3U(m3uContent) {
       const lines = m3uContent.split('\n');
       const channels = [];
@@ -188,41 +240,6 @@
       log(`加载完成，共 ${channels.length} 个频道`);
     }
 
-    // 加载 M3U 订阅（关键修改：本地代理使用 /m3u 接口）
-    function loadM3U() {
-      const url = document.getElementById('m3uUrl').value.trim();
-      if (!url) {
-        alert('请输入M3U地址');
-        return;
-      }
-
-      let fetchUrl;
-      if (proxySelect.value === 'local') {
-        // 使用本地代理的 /m3u 接口（会自动重写所有资源为 /proxy?url=...）
-        fetchUrl = `http://localhost:3000/m3u?url=${encodeURIComponent(url)}`;
-        log(`[INFO] 使用本地代理加载订阅: ${fetchUrl}`);
-      } else {
-        // 其他代理直接获取原始 M3U
-        fetchUrl = getProxiedUrl(url);
-        log(`[INFO] 使用通用代理加载: ${fetchUrl}`);
-      }
-
-      fetch(fetchUrl)
-        .then(res => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return proxySelect.value === 'local' ? res.text() : res.json().then(data => data.contents);
-        })
-        .then(content => {
-          const m3uText = proxySelect.value === 'local' ? content : decodeURIComponent(content);
-          parseM3U(m3uText);
-        })
-        .catch(err => {
-          log(`[ERROR] 加载失败: ${err.message}`);
-          alert('加载订阅失败，请检查地址或代理服务是否运行');
-        });
-    }
-
-    // 直接播放（走代理）
     function playDirect() {
       const url = document.getElementById('m3uUrl').value.trim();
       if (!url) {
@@ -232,13 +249,12 @@
       playUrl(url, '直链播放');
     }
 
-    // 更新本地代理配置状态
     function updateLocalProxy() {
       log('[INFO] 本地代理配置更新');
-      testLocalProxy(); // 自动测试连接
+      testLocalProxy();
     }
 
-    // 测试本地代理连通性
+    // ✅ 修复：正确测试本地代理
     function testLocalProxy() {
       fetch('http://localhost:3000/health')
         .then(res => res.json())
@@ -248,19 +264,17 @@
         })
         .catch(err => {
           proxyStatus.textContent = '本地代理: 未连接 ❌';
-          log('[ERROR] 本地代理连接失败: ' + err.message);
+          log('[ERROR] 本地代理无法访问，请确认 server.js 正在运行: ' + err.message);
         });
     }
 
-    // 测试简单流（可选）
     function testSimpleStream() {
       const testUrl = 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8';
       playUrl(testUrl, '测试流');
     }
 
-    // 初始化
     log('IPTV 播放器已加载');
-    toggleDebug(); // 默认显示日志
+    toggleDebug();
   </script>
 </body>
 </html>
