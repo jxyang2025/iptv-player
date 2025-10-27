@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>IPTV 精美播放器</title>
+    <title>IPTV 精美播放器 - 修复版</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet"/>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.0/dist/hls.min.js"></script>
     <style>
         body {
-            background-color: #121212;
+            background-color: #000000;
             color: #e0e0e0;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
@@ -91,10 +91,6 @@
             color: #03dac6;
             font-weight: bold;
         }
-        .proxy-item {
-            font-size: 0.9em;
-            color: #ccc;
-        }
         footer {
             text-align: center;
             margin-top: 30px;
@@ -126,7 +122,7 @@
         .debug-panel {
             max-height: 300px;
             overflow-y: auto;
-            font-family: monospace;
+            font-family: 'Courier New', monospace;
             font-size: 12px;
             background-color: #0a0a0a;
             border: 1px solid #333;
@@ -144,29 +140,33 @@
             margin-bottom: 5px;
             padding: 3px 5px;
             border-radius: 3px;
+            border-left: 3px solid transparent;
         }
         .debug-entry.info {
-            background-color: rgba(0, 100, 200, 0.2);
+            border-left-color: #2196F3;
         }
         .debug-entry.warning {
-            background-color: rgba(200, 150, 0, 0.2);
+            border-left-color: #FF9800;
         }
         .debug-entry.error {
-            background-color: rgba(200, 50, 50, 0.2);
+            border-left-color: #F44336;
         }
         .debug-entry.success {
-            background-color: rgba(0, 150, 50, 0.2);
+            border-left-color: #4CAF50;
         }
         .debug-timestamp {
             color: #888;
             font-size: 10px;
             margin-right: 10px;
         }
+        .badge {
+            font-size: 0.7em;
+        }
     </style>
 </head>
 <body>
 <div class="container bg-dark-custom">
-    <h1 class="text-center mb-4 text-white">IPTV 高清播放器</h1>
+    <h1 class="text-center mb-4 text-white">IPTV 高清播放器 - 修复版</h1>
 
     <div class="row">
         <!-- 左侧控制区 -->
@@ -190,7 +190,8 @@
                         <label for="corsProxy" class="form-label text-secondary-custom">CORS 代理设置</label>
                         <select class="form-select" id="corsProxy">
                             <option value="">不使用代理</option>
-                            <option value="http://localhost:3000/proxy?url=">本地代理</option>
+                            <option value="http://localhost:3000/proxy?url=" selected>本地代理 (修复版)</option>
+                            <option value="http://localhost:3000/?url=">本地代理 (旧版)</option>
                             <option value="https://m3u.521986.xyz/?url=">默认代理: m3u.521986.xyz</option>
                             <option value="https://cors-anywhere.herokuapp.com/">Heroku Proxy</option>
                             <option value="https://proxy.scrapping.do/">scrapping.do</option>
@@ -203,7 +204,6 @@
             <div class="card border-secondary-custom">
                 <div class="card-header">频道列表</div>
                 <div class="card-body channels-panel bg-dark-custom" id="channelList">
-                    <!-- 频道将动态插入 -->
                     <p class="text-muted">加载订阅或直链后显示频道</p>
                 </div>
             </div>
@@ -230,7 +230,7 @@
     <div class="card mt-4 border-secondary-custom">
         <div class="card-header">
             <div class="debug-header">
-                <span>调试面板</span>
+                <span><i class="bi bi-bug"></i> 调试面板</span>
                 <div>
                     <button class="btn btn-sm btn-outline-light" onclick="toggleDebugPanel()">
                         <i class="bi bi-chevron-down" id="debugToggleIcon"></i> 切换显示
@@ -256,7 +256,7 @@
 
 <script>
     let hls;
-    let allChannels = {}; // 存储所有频道 { channelName: [ {name, url}, ... ] }
+    let allChannels = {};
     let currentChannel = null;
     let debugPanelVisible = true;
 
@@ -309,7 +309,6 @@
         logDebug(`开始测试代理连接: ${proxy}`, 'info');
         
         try {
-            // 测试一个简单的URL
             const testUrl = 'https://httpbin.org/get';
             const finalUrl = buildProxyUrl(proxy, testUrl);
             
@@ -337,7 +336,9 @@
         hls = new Hls({
             liveSyncDurationCount: 10,
             maxBufferSize: 2 * 1000 * 1000,
-            backBufferLength: 60
+            backBufferLength: 60,
+            enableWorker: true,
+            lowLatencyMode: true
         });
         
         hls.attachMedia(video);
@@ -466,7 +467,6 @@
         for (let line of lines) {
             line = line.trim();
             if (line.startsWith('#EXTINF:')) {
-                // 提取频道名称
                 const match = line.match(/,(.+)$/);
                 channelName = match ? match[1].trim() : '未知频道';
                 logDebug(`找到频道: ${channelName}`, 'info');
@@ -477,7 +477,7 @@
                     }
                     allChannels[channelName].push({ name: channelName, url: ensureHTTPS(line.trim()) });
                     channelCount++;
-                    channelName = ''; // 重置
+                    channelName = '';
                 }
             }
         }
@@ -527,7 +527,6 @@
         document.getElementById('currentPlayback').textContent = name;
         renderSourceSwitcher();
         
-        // 默认播放第一个源
         if (allChannels[name] && allChannels[name].length > 0) {
             const proxy = document.getElementById('corsProxy').value;
             const url = buildProxyUrl(proxy, allChannels[name][0].url);
@@ -567,7 +566,6 @@
             const label = `${currentChannel} (源${index + 1})`;
             playStream(url, label);
 
-            // 更新按钮状态
             document.querySelectorAll('.source-item').forEach((btn, i) => {
                 btn.classList.toggle('active', i === index);
             });
@@ -583,7 +581,6 @@
         hls.loadSource(url);
         document.getElementById('currentPlayback').textContent = label || "播放中";
         
-        // 监听播放事件
         video.onplay = () => {
             logDebug(`视频开始播放: ${label}`, 'success');
         };
@@ -596,7 +593,6 @@
     // 确保URL是HTTPS
     function ensureHTTPS(url) {
         try {
-            // 处理相对路径
             if (url.startsWith('//')) {
                 const httpsUrl = 'https:' + url;
                 logDebug(`相对路径转换为HTTPS: ${url} -> ${httpsUrl}`, 'info');
@@ -620,10 +616,6 @@
     document.addEventListener('DOMContentLoaded', function() {
         logDebug('IPTV播放器初始化完成', 'success');
         initHLS();
-        
-        // 示例：自动填充测试链接
-        // document.getElementById('m3u8Url').value = "https://example.com/live/stream.m3u8";
-        // document.getElementById('m3uSubscription').value = "https://example.com/playlist.m3u";
     });
 </script>
 
