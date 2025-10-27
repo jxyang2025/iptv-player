@@ -3,210 +3,688 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>IPTV 播放器 - 修复版</title>
+    <title>IPTV 精美播放器 - 修复版</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet"/>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.0/dist/hls.min.js"></script>
     <style>
-        body {
-            background-color: #f8f9fa;
-            color: #333;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        :root {
+            --primary-color: #007bff;
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+            --light-color: #f8f9fa;
+            --dark-color: #343a40;
+            --text-color: #333;
+            --text-light: #6c757d;
+            --bg-color: #ffffff;
+            --card-bg: #f8f9fa;
+            --border-color: #dee2e6;
         }
+        
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+        }
+        
         .container {
             max-width: 1200px;
             margin: 20px auto;
             padding: 20px;
         }
+        
         .card {
-            background-color: white;
-            border: 1px solid #dee2e6;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
             border-radius: 12px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            margin-bottom: 20px;
         }
+        
+        .card-header {
+            background-color: var(--primary-color);
+            font-size: 1.2em;
+            font-weight: bold;
+            color: white;
+            padding: 12px 20px;
+        }
+        
+        .form-control, .form-select {
+            background-color: white;
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+        }
+        
+        .form-control:focus, .form-select:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+        }
+        
+        .btn-primary {
+            background-color: var(--primary-color);
+            border: none;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+        
+        .btn-outline-secondary {
+            border-color: var(--border-color);
+            color: var(--text-light);
+        }
+        
+        .btn-outline-secondary:hover {
+            background-color: var(--border-color);
+            color: var(--text-color);
+        }
+        
         .video-container {
+            position: relative;
             width: 100%;
             height: 500px;
             background-color: #000;
             border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
         }
+        
         #video {
             width: 100%;
             height: 100%;
+            object-fit: contain;
+        }
+        
+        .channels-panel {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        
+        .channel-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+        }
+        
+        .channel-item:hover {
+            background-color: #e9ecef;
+        }
+        
+        .channel-item.active {
+            background-color: #e3f2fd;
+            border-left: 3px solid var(--primary-color);
+            font-weight: bold;
+        }
+        
+        .source-item {
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+        
+        .source-item.active {
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+        
+        .debug-panel {
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            background-color: #f8f9fa;
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        
+        .debug-entry {
+            margin-bottom: 5px;
+            padding: 3px 5px;
+            border-left: 3px solid transparent;
+            background-color: white;
+        }
+        
+        .debug-entry.info { 
+            border-left-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+        
+        .debug-entry.warning { 
+            border-left-color: var(--warning-color);
+            color: var(--warning-color);
+        }
+        
+        .debug-entry.error { 
+            border-left-color: var(--danger-color);
+            color: var(--danger-color);
+        }
+        
+        .debug-entry.success { 
+            border-left-color: var(--success-color);
+            color: var(--success-color);
+        }
+        
+        .debug-timestamp {
+            color: var(--text-light);
+            font-size: 10px;
+            margin-right: 10px;
+        }
+        
+        footer {
+            text-align: center;
+            margin-top: 30px;
+            color: var(--text-light);
+            font-size: 0.9em;
+        }
+        
+        /* 滚动条样式 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+        
+        .text-success-custom {
+            color: var(--success-color) !important;
+            font-weight: bold;
+        }
+        
+        .badge {
+            font-size: 0.7em;
+        }
+        
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--dark-color);
+        }
+        
+        .form-label {
+            font-weight: 600;
+            color: var(--dark-color);
         }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1 class="text-center mb-4">IPTV 播放器 - 修复版</h1>
+    <h1 class="text-center mb-4">IPTV 高清播放器 - 明亮修复版</h1>
 
     <div class="row">
+        <!-- 左侧控制区 -->
         <div class="col-md-4">
             <div class="card mb-4">
-                <div class="card-header bg-primary text-white">直播源管理</div>
+                <div class="card-header">直播源管理</div>
                 <div class="card-body">
                     <div class="mb-3">
-                        <label class="form-label">M3U8 直链播放</label>
-                        <input type="text" class="form-control" id="m3u8Url" 
-                               value="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"/>
-                        <button class="btn btn-primary mt-2 w-100" onclick="loadDirectStream()">播放测试流</button>
+                        <label for="m3u8Url" class="form-label">M3U8 直链播放</label>
+                        <input type="text" class="form-control" id="m3u8Url" placeholder="输入 m3u8 链接"/>
+                        <button class="btn btn-primary mt-2 w-100" onclick="loadDirectStream()">播放直链</button>
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">CORS 代理设置</label>
+                        <label for="m3uSubscription" class="form-label">M3U 订阅地址</label>
+                        <input type="text" class="form-control" id="m3uSubscription" placeholder="输入 M3U 订阅链接" 
+                               value="https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/interface.txt"/>
+                        <button class="btn btn-primary mt-2 w-100" onclick="loadM3USubscription()">加载订阅</button>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="corsProxy" class="form-label">CORS 代理设置</label>
                         <select class="form-select" id="corsProxy">
                             <option value="">不使用代理</option>
+                            <option value="http://localhost:3000/proxy?url=" selected>本地代理 (/proxy路径)</option>
+                            <option value="http://localhost:3000/?url=">本地代理 (根路径)</option>
                             <option value="https://corsproxy.io/?url=">CorsProxy.io</option>
                             <option value="https://api.allorigins.win/raw?url=">AllOrigins</option>
                             <option value="https://cors-anywhere.herokuapp.com/">Heroku Proxy</option>
-                            <option value="https://proxy.scrapping.do/">scrapping.do</option>
-                            <option value="https://m3u.521986.xyz/?url=">m3u.521986.xyz</option>
                         </select>
-                        <small class="text-muted">如果某个代理失败，请尝试其他选项</small>
+                        <small class="text-muted">如果本地代理返回661错误，请尝试其他代理</small>
                     </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">频道列表</div>
+                <div class="card-body channels-panel" id="channelList">
+                    <p class="text-muted">加载订阅或直链后显示频道</p>
                 </div>
             </div>
         </div>
 
+        <!-- 右侧播放区 -->
         <div class="col-md-8">
             <div class="card">
-                <div class="card-header bg-success text-white">视频播放</div>
+                <div class="card-header">视频播放</div>
                 <div class="card-body">
                     <div class="video-container">
                         <video id="video" controls autoplay></video>
                     </div>
                     <div class="mt-3">
-                        <h6>当前播放: <span id="currentPlayback" class="text-success">准备就绪</span></h6>
-                        <div id="status" class="mt-2"></div>
+                        <h6>当前播放: <span id="currentPlayback" class="text-success-custom">无</span></h6>
+                        <div id="sourceSwitcher" class="mt-2"></div>
                     </div>
                 </div>
             </div>
             
+            <!-- 调试面板 -->
             <div class="card mt-4">
-                <div class="card-header bg-info text-white">调试信息</div>
+                <div class="card-header">
+                    调试信息 
+                    <button class="btn btn-sm btn-outline-secondary float-end" onclick="toggleDebugPanel()">隐藏</button>
+                </div>
                 <div class="card-body">
-                    <div id="debugLog" style="height: 150px; overflow-y: auto; font-family: monospace; font-size: 12px;"></div>
-                    <button class="btn btn-sm btn-outline-secondary mt-2" onclick="testAllProxies()">测试所有代理</button>
+                    <div class="debug-panel" id="debugLog"></div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="clearDebugLog()">清空日志</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="testProxyConnection()">测试代理连接</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="testDirectPlay()">测试直连播放</button>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
+<footer>
+    IPTV 播放器 &copy; 2025 | 支持 M3U8 直链与订阅源播放
+</footer>
+
 <script>
     let hls;
+    let allChannels = {};
+    let currentChannel = null;
+    let debugPanelVisible = true;
+
     const video = document.getElementById('video');
-// 可用的测试源
-const testStreams = [
-    "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-    "https://multiplatform-f.akamaihd.net/i/multi/will/bunny/big_buck_bunny_,640x360_400,640x360_700,640x360_1000,950x540_1500,.f4v.csmil/master.m3u8",
-    "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8"
-];
+
+    // 调试日志功能
     function logDebug(message, type = 'info') {
         const debugLog = document.getElementById('debugLog');
         const timestamp = new Date().toLocaleTimeString();
+        
         const entry = document.createElement('div');
-        entry.innerHTML = `<span class="text-muted">[${timestamp}]</span> <span class="text-${type}">${message}</span>`;
+        entry.className = `debug-entry ${type}`;
+        entry.innerHTML = `<span class="debug-timestamp">${timestamp}</span>${message}`;
+        
         debugLog.appendChild(entry);
         debugLog.scrollTop = debugLog.scrollHeight;
-        console.log(`[${type}] ${message}`);
+        
+        console.log(`[${type.toUpperCase()}] ${message}`);
     }
 
+    function clearDebugLog() {
+        document.getElementById('debugLog').innerHTML = '';
+        logDebug('日志已清空', 'info');
+    }
+
+    function toggleDebugPanel() {
+        const debugPanel = document.querySelector('.debug-panel').parentElement.parentElement;
+        debugPanelVisible = !debugPanelVisible;
+        debugPanel.style.display = debugPanelVisible ? 'block' : 'none';
+        document.querySelector('.card-header button').textContent = debugPanelVisible ? '隐藏' : '显示';
+        logDebug(`调试面板${debugPanelVisible ? '显示' : '隐藏'}`, 'info');
+    }
+
+    // 测试代理连接
+    async function testProxyConnection() {
+        const proxy = document.getElementById('corsProxy').value;
+        
+        if (!proxy) {
+            logDebug('未选择代理，跳过测试', 'warning');
+            return;
+        }
+        
+        logDebug(`开始测试代理连接: ${proxy}`, 'info');
+        
+        try {
+            const testUrl = 'https://httpbin.org/get';
+            const finalUrl = buildProxyUrl(proxy, testUrl);
+            
+            logDebug(`测试URL: ${finalUrl}`, 'info');
+            
+            const response = await fetch(finalUrl, { method: 'HEAD' });
+            
+            if (response.ok) {
+                logDebug(`代理连接成功! 状态码: ${response.status}`, 'success');
+            } else {
+                logDebug(`代理连接失败! 状态码: ${response.status}`, 'error');
+            }
+        } catch (error) {
+            logDebug(`代理测试错误: ${error.message}`, 'error');
+        }
+    }
+
+    // 测试直连播放（绕过代理）
+    function testDirectPlay() {
+        const testUrl = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
+        logDebug(`测试直连播放: ${testUrl}`, 'info');
+        playStream(testUrl, "测试流");
+    }
+
+    // 初始化 HLS
     function initHLS() {
-        if (hls) hls.destroy();
+        if (hls) {
+            hls.destroy();
+            logDebug('HLS实例已销毁', 'info');
+        }
         
         hls = new Hls({
+            liveSyncDurationCount: 10,
+            maxBufferSize: 2 * 1000 * 1000,
+            backBufferLength: 60,
             enableWorker: true,
             lowLatencyMode: true,
-            backBufferLength: 60
+            debug: false
         });
         
         hls.attachMedia(video);
         
         hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-            logDebug('HLS.js 初始化成功', 'success');
+            logDebug('HLS.js与视频元素绑定成功', 'success');
         });
         
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            logDebug('视频流加载成功', 'success');
-            video.play().catch(e => logDebug('自动播放被阻止: ' + e.message, 'warning'));
+        hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+            logDebug(`媒体清单解析成功，共 ${data.levels.length} 个质量级别`, 'success');
         });
         
         hls.on(Hls.Events.ERROR, (event, data) => {
+            logDebug(`HLS错误: ${data.type} - ${data.details}`, 'error');
+            
             if (data.fatal) {
-                logDebug(`HLS错误: ${data.type} - ${data.details}`, 'error');
-                switch(data.type) {
+                switch (data.type) {
                     case Hls.ErrorTypes.NETWORK_ERROR:
+                        logDebug("网络错误，尝试恢复...", 'warning');
                         hls.startLoad();
                         break;
                     case Hls.ErrorTypes.MEDIA_ERROR:
+                        logDebug("媒体错误，尝试恢复...", 'warning');
                         hls.recoverMediaError();
                         break;
                     default:
+                        logDebug("无法恢复的错误，销毁HLS实例", 'error');
                         hls.destroy();
                         break;
                 }
             }
         });
+        
+        logDebug('HLS.js初始化完成', 'success');
     }
 
+    // 播放直链
     function loadDirectStream() {
         const url = document.getElementById('m3u8Url').value.trim();
         const proxy = document.getElementById('corsProxy').value;
 
         if (!url) {
-            alert('请输入URL');
+            logDebug("请输入有效的 m3u8 链接", 'warning');
+            alert("请输入有效的 m3u8 链接");
             return;
         }
 
+        logDebug(`开始播放直链: ${url}`, 'info');
         const finalUrl = buildProxyUrl(proxy, url);
-        logDebug(`播放URL: ${finalUrl}`, 'info');
+        logDebug(`构建后的URL: ${finalUrl}`, 'info');
         
-        playStream(finalUrl, "测试流");
+        playStream(finalUrl, "直链播放");
     }
 
-    function buildProxyUrl(proxy, url) {
-        if (!proxy) return url;
-        return proxy + encodeURIComponent(url);
-    }
+    // 加载 M3U 订阅
+    async function loadM3USubscription() {
+        const subUrl = document.getElementById('m3uSubscription').value.trim();
+        const proxy = document.getElementById('corsProxy').value;
 
-    function playStream(url, label) {
-        initHLS();
-        document.getElementById('currentPlayback').textContent = label;
-        hls.loadSource(url);
-    }
+        if (!subUrl) {
+            logDebug("请输入有效的 M3U 订阅链接", 'warning');
+            alert("请输入有效的 M3U 订阅链接");
+            return;
+        }
 
-    async function testAllProxies() {
-        const testUrl = 'https://httpbin.org/get';
-        const proxies = [
-            {name: '无代理', url: ''},
-            {name: 'CorsProxy.io', url: 'https://corsproxy.io/?url='},
-            {name: 'AllOrigins', url: 'https://api.allorigins.win/raw?url='},
-            {name: 'Heroku', url: 'https://cors-anywhere.herokuapp.com/'},
-            {name: 'scrapping.do', url: 'https://proxy.scrapping.do/'},
-            {name: 'm3u.521986.xyz', url: 'https://m3u.521986.xyz/?url='}
-        ];
+        logDebug(`开始加载M3U订阅: ${subUrl}`, 'info');
+        const finalUrl = buildProxyUrl(proxy, subUrl);
+        logDebug(`构建后的订阅URL: ${finalUrl}`, 'info');
 
-        logDebug('开始测试所有代理...', 'info');
-        
-        for (const proxy of proxies) {
-            try {
-                const finalUrl = buildProxyUrl(proxy.url, testUrl);
-                const response = await fetch(finalUrl, { method: 'HEAD' });
-                logDebug(`${proxy.name}: ${response.ok ? '✓ 可用' : '✗ 不可用'} (${response.status})`, 
-                         response.ok ? 'success' : 'error');
-            } catch (error) {
-                logDebug(`${proxy.name}: ✗ 错误 (${error.message})`, 'error');
+        try {
+            logDebug("发送订阅请求...", 'info');
+            const response = await fetch(finalUrl);
+            
+            if (response.status === 429) {
+                logDebug("请求过于频繁，请稍后再试", 'warning');
+                alert("请求过于频繁，请稍后再试。");
+                return;
             }
+            if (response.status === 521 || response.status === 661) {
+                logDebug(`代理服务器返回错误: ${response.status}`, 'error');
+                alert(`代理服务器错误 (${response.status})，请更换代理。`);
+                return;
+            }
+            if (!response.ok) {
+                logDebug(`HTTP错误: ${response.status}`, 'error');
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const m3uText = await response.text();
+            logDebug(`订阅加载成功，内容长度: ${m3uText.length} 字符`, 'success');
+            
+            parseM3U(m3uText);
+            renderChannelList();
+        } catch (error) {
+            logDebug(`加载订阅失败: ${error.message}`, 'error');
+            alert("加载订阅失败，请检查链接或更换代理重试。");
         }
     }
 
-    // 初始化
-    document.addEventListener('DOMContentLoaded', function() {
+    // 构建代理URL - 关键修复
+    function buildProxyUrl(proxy, url) {
+        if (!proxy) {
+            logDebug('未使用代理，直接返回URL', 'info');
+            return ensureHTTPS(url);
+        }
+        
+        // 处理URL编码和代理格式
+        const encodedUrl = encodeURIComponent(ensureHTTPS(url));
+        let finalUrl;
+        
+        if (proxy.includes('?url=')) {
+            finalUrl = `${proxy}${encodedUrl}`;
+        } else if (proxy.endsWith('/')) {
+            finalUrl = `${proxy}${encodedUrl}`;
+        } else {
+            finalUrl = `${proxy}/${encodedUrl}`;
+        }
+        
+        logDebug(`代理构建: ${proxy} + ${url} = ${finalUrl}`, 'info');
+        return finalUrl;
+    }
+
+    // 解析 M3U 内容
+    function parseM3U(m3u) {
+        logDebug("开始解析M3U内容", 'info');
+        const lines = m3u.split('\n');
+        let channelName = '';
+        allChannels = {};
+        let channelCount = 0;
+
+        for (let line of lines) {
+            line = line.trim();
+            if (line.startsWith('#EXTINF:')) {
+                const match = line.match(/,(.+)$/);
+                channelName = match ? match[1].trim() : '未知频道';
+                logDebug(`找到频道: ${channelName}`, 'info');
+            } else if (line && !line.startsWith('#')) {
+                if (channelName) {
+                    if (!allChannels[channelName]) {
+                        allChannels[channelName] = [];
+                    }
+                    allChannels[channelName].push({ name: channelName, url: ensureHTTPS(line.trim()) });
+                    channelCount++;
+                    channelName = '';
+                }
+            }
+        }
+        
+        logDebug(`M3U解析完成，共找到 ${Object.keys(allChannels).length} 个频道，${channelCount} 个源`, 'success');
+    }
+
+    // 渲染频道列表
+    function renderChannelList() {
+        const container = document.getElementById('channelList');
+        container.innerHTML = '';
+
+        if (Object.keys(allChannels).length === 0) {
+            container.innerHTML = '<p class="text-muted">未找到频道</p>';
+            logDebug("频道列表为空", 'warning');
+            return;
+        }
+
+        for (const name in allChannels) {
+            const div = document.createElement('div');
+            div.className = 'channel-item';
+            div.innerHTML = `<strong>${name}</strong> <span class="badge bg-secondary">${allChannels[name].length}源</span>`;
+            div.onclick = () => selectChannel(name);
+            container.appendChild(div);
+        }
+        
+        logDebug(`频道列表渲染完成，共 ${Object.keys(allChannels).length} 个频道`, 'success');
+    }
+
+    // 选择频道
+    function selectChannel(name) {
+        logDebug(`选择频道: ${name}`, 'info');
+        currentChannel = name;
+        
+        document.querySelectorAll('.channel-item').forEach(el => {
+            el.classList.remove('active');
+        });
+        
+        const items = document.querySelectorAll('.channel-item');
+        for (let el of items) {
+            if (el.textContent.includes(name)) {
+                el.classList.add('active');
+                break;
+            }
+        }
+
+        document.getElementById('currentPlayback').textContent = name;
+        renderSourceSwitcher();
+        
+        if (allChannels[name] && allChannels[name].length > 0) {
+            const proxy = document.getElementById('corsProxy').value;
+            const url = buildProxyUrl(proxy, allChannels[name][0].url);
+            playStream(url, name + " (源1)");
+        }
+    }
+
+    // 渲染源切换器
+    function renderSourceSwitcher() {
+        const container = document.getElementById('sourceSwitcher');
+        container.innerHTML = '<strong>选择源: </strong>';
+
+        if (!currentChannel || !allChannels[currentChannel]) {
+            logDebug("无法渲染源切换器，当前频道为空", 'warning');
+            return;
+        }
+
+        allChannels[currentChannel].forEach((source, index) => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-outline-secondary mx-1 source-item';
+            if (index === 0) btn.classList.add('active');
+            btn.textContent = `源 ${index + 1}`;
+            btn.onclick = () => switchSource(index);
+            container.appendChild(btn);
+        });
+        
+        logDebug(`源切换器渲染完成，共 ${allChannels[currentChannel].length} 个源`, 'success');
+    }
+
+    // 切换源
+    function switchSource(index) {
+        logDebug(`切换源: ${currentChannel} 的源 ${index + 1}`, 'info');
+        const sources = allChannels[currentChannel];
+        if (index >= 0 && index < sources.length) {
+            const proxy = document.getElementById('corsProxy').value;
+            const url = buildProxyUrl(proxy, sources[index].url);
+            const label = `${currentChannel} (源${index + 1})`;
+            playStream(url, label);
+
+            document.querySelectorAll('.source-item').forEach((btn, i) => {
+                btn.classList.toggle('active', i === index);
+            });
+        }
+    }
+
+    // 播放流
+    function playStream(url, label) {
+        logDebug(`开始播放: ${label}`, 'info');
+        logDebug(`播放URL: ${url}`, 'info');
+        
         initHLS();
-        logDebug('播放器初始化完成', 'success');
-        logDebug('点击"播放测试流"测试基本功能', 'info');
+        hls.loadSource(url);
+        document.getElementById('currentPlayback').textContent = label || "播放中";
+        
+        video.onplay = () => {
+            logDebug(`视频开始播放: ${label}`, 'success');
+        };
+        
+        video.onerror = () => {
+            logDebug(`视频播放错误: ${video.error ? video.error.message : '未知错误'}`, 'error');
+        };
+    }
+
+    // 确保URL是HTTPS
+    function ensureHTTPS(url) {
+        try {
+            if (url.startsWith('//')) {
+                const httpsUrl = 'https:' + url;
+                logDebug(`相对路径转换为HTTPS: ${url} -> ${httpsUrl}`, 'info');
+                return httpsUrl;
+            }
+            
+            const urlObj = new URL(url);
+            if (urlObj.protocol === 'http:') {
+                urlObj.protocol = 'https:';
+                const httpsUrl = urlObj.toString();
+                logDebug(`HTTP转换为HTTPS: ${url} -> ${httpsUrl}`, 'info');
+                return httpsUrl;
+            }
+        } catch (e) {
+            logDebug(`URL解析失败，保持原样: ${url}`, 'warning');
+        }
+        return url;
+    }
+
+    // 页面初始化
+    document.addEventListener('DOMContentLoaded', function() {
+        logDebug('IPTV播放器初始化完成', 'success');
+        initHLS();
+        
+        // 自动选择正确的代理路径
+        document.getElementById('corsProxy').value = 'http://localhost:3000/proxy?url=';
+        logDebug('已自动选择正确的代理路径: /proxy', 'success');
+        
+        // 预填充测试订阅
+        logDebug('已预填充测试订阅链接', 'info');
     });
-    
 </script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
