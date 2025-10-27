@@ -279,14 +279,17 @@
     }
 
     // 构建代理URL
-    function buildProxyUrl(proxy, url) {
-        if (!proxy) return ensureHTTPS(url);
-        if (proxy.endsWith('?url=')) {
-            return `${proxy}${encodeURIComponent(ensureHTTPS(url))}`;
-        }
-        return `${proxy}/${encodeURIComponent(ensureHTTPS(url))}`;
-    }
 
+// 在 buildProxyUrl 函数中添加
+function buildProxyUrl(proxy, url) {
+    if (!proxy) return ensureHTTPS(url);    
+    const finalUrl = proxy.endsWith('?url=') 
+        ? `${proxy}${encodeURIComponent(ensureHTTPS(url))}`
+        : `${proxy}/${encodeURIComponent(ensureHTTPS(url))}`;
+    
+    console.log('代理URL:', finalUrl); // 调试信息
+    return finalUrl;
+}
     // 解析 M3U 内容
     function parseM3U(m3u) {
         const lines = m3u.split('\n');
