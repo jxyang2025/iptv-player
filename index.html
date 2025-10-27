@@ -5,61 +5,148 @@
   <title>IPTV 高清播放器 - 明亮版</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
-    body { font-family: Arial, sans-serif; background: #f0f0f0; padding: 20px; }
-    h1 { text-align: center; color: #333; }
-    .panel { background: #fff; border-radius: 8px; padding: 15px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-    input[type="text"] { width: 60%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
-    button { padding: 10px 15px; border: none; background: #007bff; color: white; border-radius: 4px; cursor: pointer; margin: 5px; }
-    button:hover { background: #0056b3; }
-    select { padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
-    #channelList { margin: 10px 0; min-height: 40px; }
-    .channel-btn { display: inline-block; margin: 5px 5px 0 0; padding: 8px 12px; background: #007bff; color: white; border-radius: 4px; text-decoration: none; font-size: 14px; }
-    .channel-btn:hover { background: #0056b3; }
-    video { width: 100%; max-width: 800px; height: auto; border-radius: 8px; margin: 10px 0; }
-    #debugLog { background: #000; color: #0f0; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; height: 120px; overflow-y: auto; }
-    .footer { text-align: center; margin-top: 40px; color: #999; font-size: 12px; }
+    body {
+      font-family: Arial, sans-serif;
+      background: #f0f0f0;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    .container {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .panel {
+      background: #fff;
+      border-radius: 8px;
+      padding: 15px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      flex: 1;
+      min-width: 300px;
+    }
+    input[type="text"] {
+      width: 60%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    button {
+      padding: 10px 15px;
+      border: none;
+      background: #007bff;
+      color: white;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    select {
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    #channelList {
+      margin: 10px 0;
+      min-height: 40px;
+    }
+    .channel-btn {
+      display: inline-block;
+      margin: 5px 5px 0 0;
+      padding: 8px 12px;
+      background: #007bff;
+      color: white;
+      border-radius: 4px;
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .channel-btn:hover {
+      background: #0056b3;
+    }
+    video {
+      width: 100%;
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      margin: 10px 0;
+    }
+    #debugLog {
+      background: #000;
+      color: #0f0;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      height: 120px;
+      overflow-y: auto;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 40px;
+      color: #999;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
 
   <h1>IPTV 高清播放器 - 明亮版</h1>
 
-  <div class="panel">
-    <h3>IPTV 高清播放器</h3>
-    <h3>直播源管理</h3>
-    <input type="text" id="m3uUrl" placeholder="请输入M3U8 直链或订阅地址" />
-    <button onclick="loadM3U()">加载订阅</button>
-    <button onclick="playDirect()">播放直链</button>
-    <br>
-    <select id="proxySelect">
-      <option value="none">不使用代理</option>
-      <option value="local" selected>本地代理 (localhost:3000)</option>
-      <option value="default">默认代理: m3u.521986.xyz</option>
-      <option value="corsio">CorsProxy.io</option>
-      <option value="allorigins">AllOrigins</option>
-    </select>
-    <span id="proxyStatus">本地代理: 未连接</span>
-    <button onclick="updateLocalProxy()">更新本地代理</button>
-    <button onclick="testLocalProxy()">测试本地代理</button>
-    <button onclick="testSimpleStream()">测试简单流</button>
-  </div>
+  <!-- 左右两列布局 -->
+  <div class="container">
 
-  <div class="panel">
-    <h3>频道列表</h3>
-    <div id="channelList">加载订阅或直链后显示频道</div>
-  </div>
+    <!-- 左侧：直播源管理 + 频道列表 -->
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 20px;">
+      
+      <div class="panel">
+        <h3>IPTV 高清播放器</h3>
+        <h3>直播源管理</h3>
+        <input type="text" id="m3uUrl" placeholder="请输入M3U8 直链或订阅地址" />
+        <button onclick="loadM3U()">加载订阅</button>
+        <button onclick="playDirect()">播放直链</button>
+        <br>
+        <select id="proxySelect">
+          <option value="none">不使用代理</option>
+          <option value="local" selected>本地代理 (localhost:3000)</option>
+          <option value="default">默认代理: m3u.521986.xyz</option>
+          <option value="corsio">CorsProxy.io</option>
+          <option value="allorigins">AllOrigins</option>
+        </select>
+        <span id="proxyStatus">本地代理: 未连接</span>
+        <button onclick="updateLocalProxy()">更新本地代理</button>
+        <button onclick="testLocalProxy()">测试本地代理</button>
+        <button onclick="testSimpleStream()">测试简单流</button>
+      </div>
 
-  <div class="panel">
-    <h3>视频播放</h3>
-    <p>当前播放: <span id="currentChannel">无</span></p>
-    <video id="videoPlayer" controls></video>
-  </div>
+      <div class="panel">
+        <h3>频道列表</h3>
+        <div id="channelList">加载订阅或直链后显示频道</div>
+      </div>
 
-  <div class="panel">
-    <h3>调试信息</h3>
-    <button onclick="document.getElementById('debugLog').innerHTML = ''">清空日志</button>
-    <button onclick="toggleDebug()">隐藏/显示</button>
-    <div id="debugLog"></div>
+    </div>
+
+    <!-- 右侧：视频播放 + 调试信息 -->
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 20px;">
+
+      <div class="panel">
+        <h3>视频播放</h3>
+        <p>当前播放: <span id="currentChannel">无</span></p>
+        <video id="videoPlayer" controls></video>
+      </div>
+
+      <div class="panel">
+        <h3>调试信息</h3>
+        <button onclick="document.getElementById('debugLog').innerHTML = ''">清空日志</button>
+        <button onclick="toggleDebug()">隐藏/显示</button>
+        <div id="debugLog"></div>
+      </div>
+
+    </div>
+
   </div>
 
   <div class="footer">
@@ -94,7 +181,7 @@
       }
     }
 
-    // ✅ 修改1: getProxiedUrl - 本地代理使用 /proxy 接口
+    // ✅ 修改1: getProxiedUrl - 本地代理走 /proxy 接口
     function getProxiedUrl(url) {
       const proxy = proxySelect.value;
       const encodedUrl = encodeURIComponent(url);
@@ -112,13 +199,11 @@
       }
     }
 
-    // ✅ 修改2: playUrl - 如果是本地代理，直接使用原始URL（因为/m3u已重写）
+    // ✅ 修改2: playUrl - 本地代理时避免重复封装
     function playUrl(url, name = '未知频道') {
       destroyHLS();
       currentChannelEl.textContent = name;
 
-      // 如果是本地代理，且URL已经是代理格式，则直接使用
-      // 否则走 getProxiedUrl 包装（用于直链）
       const finalUrl = proxySelect.value === 'local' && !url.includes('/proxy?url=')
         ? getProxiedUrl(url)
         : url;
@@ -164,7 +249,7 @@
       }
     }
 
-    // ✅ 修改3: loadM3U - 本地代理使用 /m3u 接口自动重写资源
+    // ✅ 修改3: loadM3U - 本地代理使用 /m3u 接口自动重写资源路径
     function loadM3U() {
       const url = document.getElementById('m3uUrl').value.trim();
       if (!url) {
@@ -174,7 +259,6 @@
 
       let fetchUrl;
       if (proxySelect.value === 'local') {
-        // 使用 /m3u 接口，后端会自动重写所有 .m3u8 和 .ts 为代理路径
         fetchUrl = `http://localhost:3000/m3u?url=${encodeURIComponent(url)}`;
         log(`[INFO] 使用本地代理加载订阅: ${fetchUrl}`);
       } else {
@@ -185,7 +269,6 @@
       fetch(fetchUrl)
         .then(res => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          // 本地代理返回纯文本，其他返回 JSON
           return proxySelect.value === 'local' ? res.text() : res.json().then(data => data.contents);
         })
         .then(content => {
@@ -193,9 +276,8 @@
           parseM3U(m3uText);
         })
         .catch(err => {
-          // ✅ 修复误报问题：区分网络错误和代理未运行
           if (err.name === 'TypeError' || err.message.includes('fetch')) {
-            testLocalProxy(); // 自动检测真实状态
+            testLocalProxy();
             log('[ERROR] 网络请求失败，请检查本地代理是否运行');
             alert('加载订阅失败，请检查代理服务是否运行');
           } else {
