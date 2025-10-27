@@ -5,7 +5,6 @@
   <title>IPTV 高清播放器 - 明亮版</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
-    /* 保持你原来的样式不变 */
     body { font-family: Arial, sans-serif; background: #f0f0f0; padding: 20px; }
     h1 { text-align: center; color: #333; }
     .panel { background: #fff; border-radius: 8px; padding: 15px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
@@ -23,15 +22,16 @@
 </head>
 <body>
 
-  <h1>IPTV 高清播放器</h1>
+  <h1>IPTV 高清播放器 - 明亮版</h1>
 
   <div class="panel">
+    <h3>IPTV 高清播放器</h3>
     <h3>直播源管理</h3>
-    <input type="text" id="m3uUrl" placeholder="请输入M3U订阅地址或直链" />
+    <input type="text" id="m3uUrl" placeholder="请输入M3U8 直链或订阅地址" />
     <button onclick="loadM3U()">加载订阅</button>
     <button onclick="playDirect()">播放直链</button>
     <br>
-    <select id="proxySelect" onchange="updateProxyConfig()">
+    <select id="proxySelect">
       <option value="none">不使用代理</option>
       <option value="local" selected>本地代理 (localhost:3000)</option>
       <option value="default">默认代理: m3u.521986.xyz</option>
@@ -94,11 +94,10 @@
       }
     }
 
-    // ✅ 修改1：getProxiedUrl - 本地代理使用 /proxy 接口
+    // ✅ 修改1: getProxiedUrl - 本地代理使用 /proxy 接口
     function getProxiedUrl(url) {
       const proxy = proxySelect.value;
       const encodedUrl = encodeURIComponent(url);
-
       switch (proxy) {
         case 'local':
           return `http://localhost:3000/proxy?url=${encodedUrl}`;
@@ -113,14 +112,15 @@
       }
     }
 
-    // ✅ 修改2：playUrl - 播放时直接使用原始 URL（因为 /m3u 已重写）
+    // ✅ 修改2: playUrl - 如果是本地代理，直接使用原始URL（因为/m3u已重写）
     function playUrl(url, name = '未知频道') {
       destroyHLS();
       currentChannelEl.textContent = name;
 
-      // 只有直链才走代理封装；订阅加载时 URL 已是代理地址
-      const finalUrl = proxySelect.value === 'local' && !url.includes('/proxy?url=') 
-        ? getProxiedUrl(url) 
+      // 如果是本地代理，且URL已经是代理格式，则直接使用
+      // 否则走 getProxiedUrl 包装（用于直链）
+      const finalUrl = proxySelect.value === 'local' && !url.includes('/proxy?url=')
+        ? getProxiedUrl(url)
         : url;
 
       log(`开始播放: ${name}`);
@@ -164,7 +164,7 @@
       }
     }
 
-    // ✅ 修改3：loadM3U - 本地代理使用 /m3u 接口，其他代理保持原逻辑
+    // ✅ 修改3: loadM3U - 本地代理使用 /m3u 接口自动重写资源
     function loadM3U() {
       const url = document.getElementById('m3uUrl').value.trim();
       if (!url) {
@@ -174,7 +174,7 @@
 
       let fetchUrl;
       if (proxySelect.value === 'local') {
-        // 使用 /m3u 接口自动重写所有资源为 /proxy?url=...
+        // 使用 /m3u 接口，后端会自动重写所有 .m3u8 和 .ts 为代理路径
         fetchUrl = `http://localhost:3000/m3u?url=${encodeURIComponent(url)}`;
         log(`[INFO] 使用本地代理加载订阅: ${fetchUrl}`);
       } else {
@@ -182,32 +182,25 @@
         log(`[INFO] 使用通用代理加载: ${fetchUrl}`);
       }
 
-      // ✅ 修复：正确处理 fetch 错误，避免误报“代理未运行”
       fetch(fetchUrl)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          return proxySelect.value === 'local' 
-            ? response.text() 
-            : response.json().then(data => data.contents);
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          // 本地代理返回纯文本，其他返回 JSON
+          return proxySelect.value === 'local' ? res.text() : res.json().then(data => data.contents);
         })
         .then(content => {
-          const m3uText = proxySelect.value === 'local' 
-            ? content 
-            : decodeURIComponent(content);
+          const m3uText = proxySelect.value === 'local' ? content : decodeURIComponent(content);
           parseM3U(m3uText);
         })
-        .catch(error => {
-          // ✅ 区分网络错误和代理未运行
-          if (error.name === 'TypeError' || error.message.includes('fetch')) {
-            // 网络连接问题
-            testLocalProxy(); // 自动测试
-            log(`[ERROR] 网络错误: ${error.message}`);
-            alert('网络请求失败，请检查代理服务是否运行且允许跨域');
+        .catch(err => {
+          // ✅ 修复误报问题：区分网络错误和代理未运行
+          if (err.name === 'TypeError' || err.message.includes('fetch')) {
+            testLocalProxy(); // 自动检测真实状态
+            log('[ERROR] 网络请求失败，请检查本地代理是否运行');
+            alert('加载订阅失败，请检查代理服务是否运行');
           } else {
-            log(`[ERROR] 加载失败: ${error.message}`);
-            alert(`加载失败: ${error.message}`);
+            log(`[ERROR] 加载失败: ${err.message}`);
+            alert(`加载失败: ${err.message}`);
           }
         });
     }
@@ -254,7 +247,6 @@
       testLocalProxy();
     }
 
-    // ✅ 修复：正确测试本地代理
     function testLocalProxy() {
       fetch('http://localhost:3000/health')
         .then(res => res.json())
