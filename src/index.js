@@ -1,6 +1,6 @@
 // Worker 脚本 - 解决 CORS, HLS 相对路径, 并增强 Header 兼容性
 // ⭐ 关键修复: 彻底解决递归代理、Mixed Content和双重代理问题
-// ⭐ 修复了Response构造函数问题，确保OPTIONS请求和错误处理正常工作
+// ⭐ 修复了Response构造函数问题，确保OPTIONS请求和错误处理正常工作 2025-10-28
 
 // 辅助函数：确保所有响应都包含 CORS 头部
 function addCORSHeaders(response) {
