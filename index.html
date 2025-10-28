@@ -609,6 +609,8 @@
         const sources = allChannels[currentChannel];
         if (index >= 0 && index < sources.length) {
             const proxy = document.getElementById('corsProxy').value;
+            if proxy==='http://localhost:3000/m3u?url='
+             proxy='http://localhost:3000/proxy?url='
             const url = buildProxyUrl(proxy, sources[index].url);
             const label = `${currentChannel} (源${index + 1})`;
             playStream(url, label);
