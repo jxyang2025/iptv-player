@@ -1,9 +1,15 @@
 // Worker 脚本 - 解决 CORS, HLS 相对路径, 并增强 Header 兼容性
 // ⭐ 关键修复: 彻底解决递归代理、Mixed Content和双重代理问题
+// ⭐ 修复了Response构造函数问题，确保OPTIONS请求和错误处理正常工作
 
 // 辅助函数：确保所有响应都包含 CORS 头部
 function addCORSHeaders(response) {
-    const newResponse = new Response(response.body, response);
+    // ⭐ 修复关键问题：正确构造Response对象
+    const newResponse = new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: new Headers(response.headers)
+    });
     newResponse.headers.set('Access-Control-Allow-Origin', '*');
     newResponse.headers.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
     newResponse.headers.set('Access-Control-Allow-Headers', '*');
@@ -152,7 +158,16 @@ addEventListener('fetch', event => {
 async function handleRequest(request) {
     // 处理 CORS Preflight (OPTIONS) 请求
     if (request.method === 'OPTIONS') {
-        return addCORSHeaders(new Response(null, { status: 200 }));
+        // ⭐ 修复：直接返回正确的OPTIONS响应
+        return new Response(null, {
+            status: 200,
+            headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
+                'Access-Control-Allow-Headers': '*',
+                'Access-Control-Max-Age': '86400'
+            }
+        });
     }
     
     const url = new URL(request.url);
@@ -162,11 +177,15 @@ async function handleRequest(request) {
     const WORKER_PROXY_BASE_URL = url.origin + '/';
 
     if (!targetUrl) {
+        // ⭐ 修复：正确构造400错误响应
         const errorResponse = new Response('错误: 请提供 M3U 订阅链接或流地址作为 "url" 参数。', { 
             status: 400,
-            headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+            headers: { 
+                'Content-Type': 'text/plain; charset=utf-8',
+                'Access-Control-Allow-Origin': '*'
+            }
         });
-        return addCORSHeaders(errorResponse);
+        return errorResponse;
     }
 
     // ⭐ 关键修复: 自动将目标 URL 的 HTTP 转换为 HTTPS ⭐
@@ -221,9 +240,12 @@ async function handleRequest(request) {
             if (!response.ok) {
                 const errorResponse = new Response(`上游服务器错误: ${response.status} ${response.statusText}`, {
                     status: response.status,
-                    headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+                    headers: { 
+                        'Content-Type': 'text/plain; charset=utf-8',
+                        'Access-Control-Allow-Origin': '*'
+                    }
                 });
-                return addCORSHeaders(errorResponse);
+                return errorResponse;
             }
 
             // 获取文本内容
@@ -238,11 +260,11 @@ async function handleRequest(request) {
                 return line;
             }).join('\n');
             
-            // 创建重写后的响应
+            // ⭐ 修复：正确构造重写后的响应
             const newResponse = new Response(rewrittenText, {
                 status: response.status,
                 statusText: response.statusText,
-                headers: response.headers
+                headers: new Headers(response.headers)
             });
 
             // 设置正确的 MIME 类型
@@ -256,6 +278,7 @@ async function handleRequest(request) {
             const newHeaders = new Headers(response.headers);
             newHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
             
+            // ⭐ 修复：正确构造媒体文件响应
             const newResponse = new Response(response.body, {
                 status: response.status,
                 statusText: response.statusText,
@@ -266,11 +289,14 @@ async function handleRequest(request) {
         }
 
     } catch (e) {
-        // 代理请求失败
+        // ⭐ 修复：正确构造500错误响应
         const errorBody = `代理请求失败: ${e.message || '网络错误'}`;
-        return addCORSHeaders(new Response(errorBody, {
+        return new Response(errorBody, {
             status: 500,
-            headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-        }));
+            headers: { 
+                'Content-Type': 'text/plain; charset=utf-8',
+                'Access-Control-Allow-Origin': '*'
+            }
+        });
     }
 }
