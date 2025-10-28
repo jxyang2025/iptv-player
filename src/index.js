@@ -1,6 +1,5 @@
 // Worker 脚本 - 解决 CORS, HLS 相对路径, 并增强 Header 兼容性
 // ⭐ 关键修复: 彻底解决递归代理、Mixed Content和双重代理问题
-// ⭐ 修复了Response构造函数问题，确保OPTIONS请求和错误处理正常工作 2025-10-28
 
 // 辅助函数：确保所有响应都包含 CORS 头部
 function addCORSHeaders(response) {
@@ -156,9 +155,8 @@ addEventListener('fetch', event => {
 });
 
 async function handleRequest(request) {
-    // 处理 CORS Preflight (OPTIONS) 请求
+    // ⭐ 修复：直接处理OPTIONS请求，不经过addCORSHeaders函数
     if (request.method === 'OPTIONS') {
-        // ⭐ 修复：直接返回正确的OPTIONS响应
         return new Response(null, {
             status: 200,
             headers: {
@@ -176,16 +174,15 @@ async function handleRequest(request) {
     // 使用请求的 URL origin 作为 Worker 代理的基地址
     const WORKER_PROXY_BASE_URL = url.origin + '/';
 
+    // ⭐ 修复：直接构造400错误响应，不经过addCORSHeaders函数
     if (!targetUrl) {
-        // ⭐ 修复：正确构造400错误响应
-        const errorResponse = new Response('错误: 请提供 M3U 订阅链接或流地址作为 "url" 参数。', { 
+        return new Response('错误: 请提供 M3U 订阅链接或流地址作为 "url" 参数。', { 
             status: 400,
             headers: { 
                 'Content-Type': 'text/plain; charset=utf-8',
                 'Access-Control-Allow-Origin': '*'
             }
         });
-        return errorResponse;
     }
 
     // ⭐ 关键修复: 自动将目标 URL 的 HTTP 转换为 HTTPS ⭐
@@ -238,14 +235,14 @@ async function handleRequest(request) {
         if ((isM3U8Content || isM3U8Extension) && isSmallTextFile) {
             // 如果 M3U8 索引文件本身获取失败，直接返回错误状态
             if (!response.ok) {
-                const errorResponse = new Response(`上游服务器错误: ${response.status} ${response.statusText}`, {
+                // ⭐ 修复：直接构造错误响应，不经过addCORSHeaders函数
+                return new Response(`上游服务器错误: ${response.status} ${response.statusText}`, {
                     status: response.status,
                     headers: { 
                         'Content-Type': 'text/plain; charset=utf-8',
                         'Access-Control-Allow-Origin': '*'
                     }
                 });
-                return errorResponse;
             }
 
             // 获取文本内容
@@ -289,7 +286,7 @@ async function handleRequest(request) {
         }
 
     } catch (e) {
-        // ⭐ 修复：正确构造500错误响应
+        // ⭐ 修复：直接构造500错误响应，不经过addCORSHeaders函数
         const errorBody = `代理请求失败: ${e.message || '网络错误'}`;
         return new Response(errorBody, {
             status: 500,
