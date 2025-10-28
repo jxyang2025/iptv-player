@@ -611,8 +611,10 @@
             const proxy = document.getElementById('corsProxy').value;
             if (proxy==='http://localhost:3000/m3u?url=')
              proxy='http://localhost:3000/proxy?url=';
+            logDebug("switchSource代理地址：",proxy);
             const url = buildProxyUrl(proxy, sources[index].url);
             const label = `${currentChannel} (源${index + 1})`;
+                   logDebug("playStream地址：",url);
             playStream(url, label);
 
             document.querySelectorAll('.source-item').forEach((btn, i) => {
