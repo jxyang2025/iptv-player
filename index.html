@@ -515,7 +515,7 @@ function buildProxyUrl(proxy, url) {
 }
 
     // 解析 M3U 内容
-    function parseM3U(m3u) {
+   /****** function parseM3U(m3u) {
         logDebug("开始解析M3U内容", 'info');
         const lines = m3u.split('\n');
         let channelName = '';
@@ -544,7 +544,48 @@ function buildProxyUrl(proxy, url) {
         }
         
         logDebug(`M3U解析完成，共找到 ${Object.keys(allChannels).length} 个频道`, 'success');
+    }******/
+    // 解析 M3U 内容
+function parseM3U(m3u) {
+    logDebug("开始解析M3U内容", 'info');
+    const lines = m3u.split('\n');
+    let channelName = '';
+    allChannels = {};
+    let channelCount = 0;
+
+    for (let line of lines) {
+        line = line.trim();
+        if (line.startsWith('#EXTINF:')) {
+            const match = line.match(/,(.+)$/);
+            channelName = match ? match[1].trim() : '未知频道';
+            logDebug(`找到频道: ${channelName}`, 'info');
+        } else if (line && !line.startsWith('#')) {
+            if (channelName) {
+                if (!allChannels[channelName]) {
+                    allChannels[channelName] = [];
+                }
+                
+                // 将原始 URL 通过代理处理
+                const originalUrl = ensureHTTPS(line.trim());
+                
+                // 获取当前代理设置
+                const proxy = document.getElementById('corsProxy').value;
+                
+                // 构建代理 URL
+                const processedUrl = buildProxyUrl(proxy, originalUrl);
+                
+                allChannels[channelName].push({ 
+                    name: channelName, 
+                    url: processedUrl  // 使用代理后的 URL
+                });
+                channelCount++;
+                channelName = '';
+            }
+        }
     }
+    
+    logDebug(`M3U解析完成，共找到 ${Object.keys(allChannels).length} 个频道`, 'success');
+}
 
     // 渲染频道列表
     function renderChannelList() {
