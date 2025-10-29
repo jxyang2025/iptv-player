@@ -1,5 +1,5 @@
 /**
- * M3U/CORS 代理服务 - 最终版（支持相对路径处理）
+ * M3U/CORS 代理服务 - 修复版（增强 M3U8 检测）
  */
 
 // CORS 允许的头部
@@ -8,16 +8,6 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
   'Access-Control-Max-Age': '86400'
 };
-
-// M3U8/TS 等媒体内容类型
-const mediaTypes = [
-  'application/vnd.apple.mpegurl',
-  'application/x-mpegurl',
-  'audio/mpegurl',
-  'audio/x-mpegurl',
-  'video/mp2t',
-  'application/octet-stream'
-];
 
 // 模拟设备的 User-Agent
 const FAKE_UA = 'Mozilla/5.0 (Linux; Android 10; SM-G960F) AppleWebKit/537.36';
@@ -58,6 +48,30 @@ class M3URewriter {
     
     text.replace(newText, { html: false });
   }
+}
+
+/**
+ * 检查是否为 M3U8 内容
+ */
+function isM3U8Content(contentType, contentSample = '') {
+  const mediaTypes = [
+    'application/vnd.apple.mpegurl',
+    'application/x-mpegurl',
+    'audio/mpegurl',
+    'audio/x-mpegurl', 
+    'video/mp2t',
+    'application/octet-stream'
+  ];
+  
+  // 检查 Content-Type
+  const isMedia = mediaTypes.some(type => contentType.includes(type));
+  
+  // 检查是否为 text/plain 但内容以 #EXTM3U 开头
+  if (!isMedia && contentType.includes('text/plain')) {
+    return contentSample.trim().startsWith('#EXTM3U');
+  }
+  
+  return isMedia;
 }
 
 /**
@@ -123,13 +137,11 @@ async function handleRequest(request) {
           });
         }
       } else {
-        // 这是相对路径请求，比如 /p/01.m3u8?msisdn=...
-        // 尝试从 Referer 获取原始请求上下文
+        // 相对路径请求，尝试从 Referer 获取上下文
         const referer = request.headers.get('Referer');
         if (referer) {
           try {
             const refererUrl = new URL(referer);
-            // 检查 Referer 是否也是我们的代理 URL
             const refererPathParts = refererUrl.pathname.split('/');
             if (refererPathParts[1] === 'p' && refererPathParts[2]) {
               const refererEncoded = refererPathParts[2];
@@ -137,7 +149,6 @@ async function handleRequest(request) {
                 const refererDecoded = safeDecode(refererEncoded);
                 const refererOriginal = decodeURIComponent(refererDecoded);
                 
-                // 从原始 URL 构建相对路径的完整 URL
                 const relativePath = encodedTarget + url.search;
                 const finalTarget = new URL(relativePath, refererOriginal).href;
                 
@@ -149,7 +160,6 @@ async function handleRequest(request) {
           }
         }
         
-        // 如果仍然无法构建目标 URL，返回错误
         if (!targetUrl) {
           return new Response(`错误: 无法处理相对路径请求。请确保主 M3U8 文件被正确重写。\n\n收到请求: ${url.pathname}${url.search}\nReferer: ${referer || 'none'}`, {
             status: 400,
@@ -162,7 +172,7 @@ async function handleRequest(request) {
 
   // === 3. 验证目标 URL ===
   if (!targetUrl) {
-    return new Response('v2错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
+    return new Response('v3错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
     });
@@ -177,7 +187,7 @@ async function handleRequest(request) {
     });
   }
 
-  // === 4. 设置代理请求选项 ===
+  // === 4. 发起代理请求 ===
   const proxyOptions = {
     method: request.method,
     headers: {
@@ -192,14 +202,14 @@ async function handleRequest(request) {
   delete proxyOptions.headers['origin'];
   delete proxyOptions.headers['referer'];
 
-  // === 5. 发起代理请求 ===
   try {
     const response = await fetch(targetUrl, proxyOptions);
 
     // 获取原始响应类型
     const contentType = response.headers.get('content-type') || '';
-    const isMedia = mediaTypes.some(type => contentType.includes(type));
-    const isHtml = contentType.includes('text/html') || contentType.includes('text/plain');
+    
+    // 检查是否为 M3U8 内容
+    const isM3U8 = isM3U8Content(contentType);
 
     // 构造新的响应头
     const newHeaders = new Headers(response.headers);
@@ -207,8 +217,8 @@ async function handleRequest(request) {
       newHeaders.set(key, value);
     });
 
-    // 如果是 M3U8 或文本类媒体，使用 HTMLRewriter 重写内容
-    if (isMedia || isHtml) {
+    // 如果是 M3U8 内容，使用 HTMLRewriter 重写
+    if (isM3U8) {
       return new HTMLRewriter()
         .on('body', new M3URewriter(request.url, targetUrl))
         .transform(
