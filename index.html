@@ -483,12 +483,13 @@
         }
     }
 
-    // 构建代理URL
-    function buildProxyUrl(proxy, url) {
-        if (!proxy) {
-            return ensureHTTPS(url);
-        }
-         
+
+// 构建代理URL
+function buildProxyUrl(proxy, url) {
+    if (!proxy) {
+        return ensureHTTPS(url);
+    }
+    
     const targetUrl = ensureHTTPS(url);
     
     // 如果是 Base64 路径代理格式
@@ -496,20 +497,22 @@
         // 使用 Base64 编码
         const encodedUrl = btoa(encodeURIComponent(targetUrl));
         return `${proxy}${encodedUrl}`;
-    } 
-        const encodedUrl = encodeURIComponent(ensureHTTPS(url));
-        let finalUrl;
-        
-        if (proxy.includes('?url=')) {
-            finalUrl = `${proxy}${encodedUrl}`;
-        } else if (proxy.endsWith('/')) {
-            finalUrl = `${proxy}${encodedUrl}`;
-        } else {
-            finalUrl = `${proxy}/${encodedUrl}`;
-        }
-        
-        return finalUrl;
     }
+    
+    // 其他格式仍使用 URL 编码
+    const encodedUrl = encodeURIComponent(targetUrl);
+    let finalUrl;
+    
+    if (proxy.includes('?url=')) {
+        finalUrl = `${proxy}${encodedUrl}`;
+    } else if (proxy.endsWith('/')) {
+        finalUrl = `${proxy}${encodedUrl}`;
+    } else {
+        finalUrl = `${proxy}/${encodedUrl}`;
+    }
+    
+    return finalUrl;
+}
 
     // 解析 M3U 内容
     function parseM3U(m3u) {
