@@ -1,5 +1,5 @@
 /**
- * M3U/CORS 代理服务 - 超级强制版（对所有可能的 M3U8 内容进行重写）
+ * M3U/CORS 代理服务 - 终极版（强制重写所有 M3U8 内容）
  */
 
 // CORS 允许的头部
@@ -17,47 +17,35 @@ class M3URewriter {
   constructor(requestUrl, originalTargetUrl) {
     this.requestUrl = new URL(requestUrl);
     this.originalTargetUrl = new URL(originalTargetUrl);
-    console.log('M3URewriter created for:', requestUrl, 'original:', originalTargetUrl);
   }
 
-  element(element) {
-    console.log('M3URewriter element called');
-  }
+  element(element) {}
 
   text(text) {
-    console.log('M3URewriter text processing, original length:', text.text.length);
     let newText = text.text;
     
     // 重写完整 URL
-    const originalUrlCount = (newText.match(/https?:\/\/[^\s"'\]]+/g) || []).length;
     newText = newText.replace(/(https?:\/\/[^\s"'\]]+)/g, (match) => {
       if (match.includes(this.requestUrl.host)) return match;
       const encodedTarget = btoa(encodeURIComponent(match));
-      const newUrl = `${this.requestUrl.origin}/p/${encodedTarget}`;
-      console.log('Rewrote URL:', match, '->', newUrl);
-      return newUrl;
+      return `${this.requestUrl.origin}/p/${encodedTarget}`;
     });
     
     // 重写相对路径（.m3u8, .ts 等）
-    const relativePathCount = (newText.match(/[^\n#]*\.(m3u8|ts)[^\s]*/g) || []).length;
     newText = newText.replace(/([^\n#]*\.(m3u8|ts)[^\s]*)/g, (match) => {
       if (match.startsWith('http')) return match; // 已是完整 URL
       if (match.includes(this.requestUrl.host)) return match; // 已是代理链接
       
-      // 将相对路径转换为完整 URL
+      // 将相对路径转换为完整 URL 并代理
       try {
         const absoluteUrl = new URL(match, this.originalTargetUrl).href;
         const encodedTarget = btoa(encodeURIComponent(absoluteUrl));
-        const newUrl = `${this.requestUrl.origin}/p/${encodedTarget}`;
-        console.log('Rewrote relative path:', match, '->', newUrl);
-        return newUrl;
+        return `${this.requestUrl.origin}/p/${encodedTarget}`;
       } catch (e) {
-        console.log('Failed to rewrite relative path:', match, e.message);
         return match; // 保持原样
       }
     });
     
-    console.log('M3U rewriter stats - URLs:', originalUrlCount, 'Relative paths:', relativePathCount);
     text.replace(newText, { html: false });
   }
 }
@@ -76,17 +64,26 @@ function safeDecode(str) {
 }
 
 /**
- * 检查内容是否为 M3U8 格式
+ * 检查是否应该重写响应
  */
-function isM3U8Content(content) {
-  const lowerContent = content.toLowerCase();
-  return (
-    lowerContent.includes('#extm3u') ||
-    lowerContent.includes('.m3u8') ||
-    lowerContent.includes('.ts') ||
-    lowerContent.includes('index.m3u8') ||
-    lowerContent.includes('playlist.m3u8')
-  );
+function shouldRewriteResponse(contentType, content) {
+  // 检查 Content-Type
+  const mediaTypes = [
+    'application/vnd.apple.mpegurl',
+    'application/x-mpegurl',
+    'audio/mpegurl',
+    'audio/x-mpegurl',
+    'video/mp2t',
+    'application/octet-stream'
+  ];
+  
+  const isMedia = mediaTypes.some(type => contentType.includes(type));
+  
+  // 检查内容是否包含 M3U8 标识
+  const hasM3U8Markers = content.toLowerCase().includes('#extm3u') || 
+                        content.toLowerCase().includes('.m3u8');
+  
+  return isMedia || hasM3U8Markers;
 }
 
 /**
@@ -94,7 +91,6 @@ function isM3U8Content(content) {
  */
 async function handleRequest(request) {
   const url = new URL(request.url);
-  console.log('=== Processing request ===', request.url);
 
   // === 1. 处理 OPTIONS 预检请求 ===
   if (request.method === 'OPTIONS') {
@@ -113,7 +109,7 @@ async function handleRequest(request) {
     try {
       targetUrl = new URL(decodeURIComponent(urlParam)).href;
     } catch (err) {
-      return new Response('错误: 无效的 URL 格式 (url 参数)', {
+      return new Response('终极版-错误: 无效的 URL 格式 (url 参数)', {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
       });
@@ -164,7 +160,7 @@ async function handleRequest(request) {
         }
         
         if (!targetUrl) {
-          return new Response(`14:05错误: 无法处理相对路径请求。请确保主 M3U8 文件被正确重写。\n\n收到请求: ${url.pathname}${url.search}\nReferer: ${referer || 'none'}`, {
+          return new Response(`错误: 无法处理相对路径请求。请确保主 M3U8 文件被正确重写。\n\n收到请求: ${url.pathname}${url.search}\nReferer: ${referer || 'none'}`, {
             status: 400,
             headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
           });
@@ -206,20 +202,18 @@ async function handleRequest(request) {
   delete proxyOptions.headers['referer'];
 
   try {
-    console.log('Making proxy request to:', targetUrl);
     const response = await fetch(targetUrl, proxyOptions);
 
     // 获取原始响应类型
     const contentType = response.headers.get('content-type') || '';
-    console.log('Response content-type:', contentType);
-
+    
     // 构造新的响应头
     const newHeaders = new Headers(response.headers);
     Object.entries(corsHeaders).forEach(([key, value]) => {
       newHeaders.set(key, value);
     });
 
-    // 检查是否应该进行 M3U8 重写
+    // 检查是否需要重写 - 对于可能的 M3U8 内容
     let shouldRewrite = false;
     
     // 检查 Content-Type
@@ -234,23 +228,20 @@ async function handleRequest(request) {
     
     if (isMedia) {
       shouldRewrite = true;
-      console.log('Will rewrite based on content-type');
     } else if (contentType.includes('text/plain') || contentType.includes('text/html')) {
-      // 对于 text/plain 或 text/html，检查内容
+      // 对于 text 类型，检查内容
       const clonedResponse = response.clone();
       const content = await clonedResponse.text();
       
-      if (isM3U8Content(content)) {
+      // 检查内容是否包含 M3U8 标识
+      if (content.toLowerCase().includes('#extm3u') || 
+          content.toLowerCase().includes('.m3u8')) {
         shouldRewrite = true;
-        console.log('Will rewrite based on content detection');
-      } else {
-        console.log('Content does not appear to be M3U8');
       }
     }
 
     // 如果需要重写，使用 HTMLRewriter
     if (shouldRewrite) {
-      console.log('Applying M3U rewriter');
       return new HTMLRewriter()
         .on('body', new M3URewriter(request.url, targetUrl))
         .transform(
@@ -261,7 +252,6 @@ async function handleRequest(request) {
         );
     }
 
-    console.log('Returning response without rewrite');
     // 普通响应直接返回
     return new Response(response.body, {
       ...response,
