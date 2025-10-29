@@ -34,15 +34,26 @@ class M3URewriter {
   element(element) {}
 
   text(text) {
-    const newText = text.text
-      // 匹配以 http:// 或 https:// 开头的 URL
-      .replace(/(https?:\/\/[^\s"'\]]+)/g, (match) => {
-        // 避免递归代理：如果已经是代理链接，则不再包装
-        if (match.includes(this.requestUrl.host)) return match;
-        // 使用 Base64 编码的路径代理
-        const encodedTarget = btoa(encodeURIComponent(match));
-        return `${this.requestUrl.origin}/p/${encodedTarget}`;
-      });
+    let newText = text.text;
+    
+    // 重写完整 URL
+    newText = newText.replace(/(https?:\/\/[^\s"'\]]+)/g, (match) => {
+      if (match.includes(this.requestUrl.host)) return match;
+      const encodedTarget = btoa(encodeURIComponent(match));
+      return `${this.requestUrl.origin}/p/${encodedTarget}`;
+    });
+    
+    // 重写相对路径（.m3u8, .ts 等）
+    newText = newText.replace(/([^\n#]*\.(m3u8|ts)[^\s]*)/g, (match) => {
+      if (match.startsWith('http')) return match; // 已是完整 URL，跳过
+      if (match.includes(this.requestUrl.host)) return match; // 已是代理链接，跳过
+      
+      // 构造完整的目标 URL
+      // 需要从原始请求中获取基础 URL 来构建完整路径
+      // 这里需要更复杂的逻辑
+      return match; // 暂时保持原样
+    });
+    
     text.replace(newText, { html: false });
   }
 }
@@ -204,3 +215,4 @@ async function handleRequest(request) {
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
 });
+
