@@ -1,5 +1,5 @@
 /**
- * 简单测试 Worker - v2（修复版）
+ * 简单测试 Worker - v3（带唯一标识）
  */
 
 const corsHeaders = {
@@ -20,10 +20,10 @@ async function handleRequest(request) {
 
   if (url.pathname === '/test-error') {
     try {
-      // 使用一个能解析但连接失败的 IP
+      console.log('尝试连接 10.255.255.1');
       await fetch('http://10.255.255.1/', { timeout: 5000 });
     } catch (err) {
-      return new Response(`[v2] 代理失败: ${err.message}`, {
+      return new Response(`[v3] 💥 捕获 fetch 错误: ${err.message}`, {
         status: 500,
         headers: {
           ...corsHeaders,
@@ -36,19 +36,19 @@ async function handleRequest(request) {
   if (url.pathname === '/test-500') {
     try {
       const resp = await fetch('https://httpbin.org/status/500');
-      return new Response(`上游返回 ${resp.status}`, {
+      return new Response(`[v3] 🎯 上游返回 ${resp.status}`, {
         status: resp.status,
         headers: {
           ...corsHeaders,
-          'Content-Type': 'text/plain'
+          'Content-Type': 'text/plain; charset=utf-8'
         }
       });
     } catch (err) {
-      return new Response(`[v2] fetch 失败: ${err.message}`, { status: 500 });
+      return new Response(`[v3] ❌ fetch 失败: ${err.message}`, { status: 500 });
     }
   }
 
-  return new Response('[v2] Hello from simple worker!', {
+  return new Response('[v3] 🚀 Hello from simple worker! (v3)', {
     status: 200,
     headers: {
       ...corsHeaders,
