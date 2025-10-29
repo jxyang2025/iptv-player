@@ -1,5 +1,5 @@
 /**
- * M3U/CORS 代理服务 - 增强版（支持相对路径）
+ * M3U/CORS 代理服务 - 完整版（支持相对路径和 Base64）
  */
 
 // CORS 允许的头部
@@ -53,8 +53,7 @@ class M3URewriter {
         const encodedTarget = btoa(encodeURIComponent(absoluteUrl));
         return `${this.requestUrl.origin}/p/${encodedTarget}`;
       } catch (e) {
-        // 如果 URL 解析失败，保持原样
-        return match;
+        return match; // 保持原样
       }
     });
     
@@ -126,10 +125,17 @@ async function handleRequest(request) {
           });
         }
       } else {
-        // 可能是相对路径，需要从原始请求中构建完整 URL
-        // 这里需要从 Referer 或其他方式获取原始基础 URL
-        // 由于无法在路径中获取原始 URL，返回错误
-        return new Response('错误: 无法处理相对路径，请使用完整 Base64 编码 URL', {
+        // 可能是相对路径，需要从 Referer 或其他方式获取原始基础 URL
+        // 这里我们假设用户直接访问了相对路径，这在实际场景中是不合理的
+        // 实际上，相对路径请求应该来自 M3U8 内容，而 M3U8 本身是通过 Base64 访问的
+        // 所以这里需要一种机制来存储原始请求的上下文
+        
+        // 由于 Cloudflare Workers 无状态，我们无法直接获取原始请求上下文
+        // 这种情况下，我们需要使用不同的策略
+        
+        // 从 URL 的查询参数中尝试获取原始信息（如果前端支持的话）
+        // 或者返回错误，让用户知道请求格式不正确
+        return new Response('错误: 无效请求格式。请确保通过代理访问 M3U8 文件。', {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
         });
@@ -139,7 +145,7 @@ async function handleRequest(request) {
 
   // === 3. 验证目标 URL ===
   if (!targetUrl) {
-    return new Response('错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
+    return new Response('v1错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
     });
@@ -187,7 +193,7 @@ async function handleRequest(request) {
     // 如果是 M3U8 或文本类媒体，使用 HTMLRewriter 重写内容
     if (isMedia || isHtml) {
       return new HTMLRewriter()
-        .on('body', new M3URewriter(request.url, targetUrl))  // 传入原始目标 URL
+        .on('body', new M3URewriter(request.url, targetUrl))
         .transform(
           new Response(response.body, {
             ...response,
