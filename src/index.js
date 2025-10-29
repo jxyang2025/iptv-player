@@ -1,5 +1,5 @@
 /**
- * M3U/CORS 代理服务 - 强制 M3U8 重写版
+ * M3U/CORS 代理服务 - 调试版（详细日志）
  */
 
 // CORS 允许的头部
@@ -61,18 +61,6 @@ function safeDecode(str) {
   } catch (e) {
     throw new Error('Base64 解码失败: ' + e.message);
   }
-}
-
-/**
- * 检查内容是否为 M3U8（基于内容）
- */
-async function isM3U8ByContent(response) {
-  // 克隆响应以便读取内容
-  const clonedResponse = response.clone();
-  const text = await clonedResponse.text();
-  
-  // 检查是否以 #EXTM3U 开头（忽略空白字符）
-  return text.trim().startsWith('#EXTM3U');
 }
 
 /**
@@ -160,7 +148,7 @@ async function handleRequest(request) {
 
   // === 3. 验证目标 URL ===
   if (!targetUrl) {
-    return new Response('v1错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
+    return new Response('错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
     });
@@ -195,9 +183,10 @@ async function handleRequest(request) {
 
     // 获取原始响应类型
     const contentType = response.headers.get('content-type') || '';
+    const contentLength = response.headers.get('content-length') || 'unknown';
     
-    // 检查内容类型或内容本身是否为 M3U8
-    const isContentTypeM3U8 = [
+    // 检查是否为 M3U8 内容
+    const isM3U8Type = [
       'application/vnd.apple.mpegurl',
       'application/x-mpegurl',
       'audio/mpegurl',
@@ -206,21 +195,6 @@ async function handleRequest(request) {
       'application/octet-stream',
       'text/plain'
     ].some(type => contentType.includes(type));
-    
-    let shouldRewrite = false;
-    
-    if (isContentTypeM3U8) {
-      // 对于可能的 M3U8 类型，检查内容
-      if (contentType.includes('text/plain') || contentType.includes('application/octet-stream')) {
-        // 检查内容是否为 M3U8
-        if (await isM3U8ByContent(response)) {
-          shouldRewrite = true;
-        }
-      } else {
-        // 对于明确的 M3U8 类型，直接重写
-        shouldRewrite = true;
-      }
-    }
 
     // 构造新的响应头
     const newHeaders = new Headers(response.headers);
@@ -228,16 +202,34 @@ async function handleRequest(request) {
       newHeaders.set(key, value);
     });
 
-    // 如果需要重写，使用 HTMLRewriter
-    if (shouldRewrite) {
-      return new HTMLRewriter()
-        .on('body', new M3URewriter(request.url, targetUrl))
-        .transform(
-          new Response(response.body, {
-            ...response,
-            headers: newHeaders
-          })
-        );
+    // 如果是 M3U8 类型，进行重写
+    if (isM3U8Type) {
+      // 对于 text/plain 类型，检查内容是否为 M3U8
+      if (contentType.includes('text/plain')) {
+        // 这里需要特殊处理，但我们先对所有 text/plain 类型的 M3U8 都进行重写
+        const isLikelyM3U8 = true; // 假设所有 text/plain 都可能是 M3U8
+        
+        if (isLikelyM3U8) {
+          return new HTMLRewriter()
+            .on('body', new M3URewriter(request.url, targetUrl))
+            .transform(
+              new Response(response.body, {
+                ...response,
+                headers: newHeaders
+              })
+            );
+        }
+      } else {
+        // 非 text/plain 类型的 M3U8 直接重写
+        return new HTMLRewriter()
+          .on('body', new M3URewriter(request.url, targetUrl))
+          .transform(
+            new Response(response.body, {
+              ...response,
+              headers: newHeaders
+            })
+          );
+      }
     }
 
     // 普通响应直接返回
