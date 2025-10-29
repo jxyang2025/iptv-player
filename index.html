@@ -488,7 +488,15 @@
         if (!proxy) {
             return ensureHTTPS(url);
         }
-        
+         
+    const targetUrl = ensureHTTPS(url);
+    
+    // 如果是 Base64 路径代理格式
+    if (proxy.includes('/p/')) {
+        // 使用 Base64 编码
+        const encodedUrl = btoa(encodeURIComponent(targetUrl));
+        return `${proxy}${encodedUrl}`;
+    } 
         const encodedUrl = encodeURIComponent(ensureHTTPS(url));
         let finalUrl;
         
