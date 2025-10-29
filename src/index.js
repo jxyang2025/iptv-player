@@ -1,5 +1,5 @@
 /**
- * M3U/CORS 代理服务 - 支持相对路径的最终版
+ * M3U/CORS 代理服务 - 最终版（支持相对路径处理）
  */
 
 // CORS 允许的头部
@@ -9,8 +9,56 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400'
 };
 
+// M3U8/TS 等媒体内容类型
+const mediaTypes = [
+  'application/vnd.apple.mpegurl',
+  'application/x-mpegurl',
+  'audio/mpegurl',
+  'audio/x-mpegurl',
+  'video/mp2t',
+  'application/octet-stream'
+];
+
 // 模拟设备的 User-Agent
 const FAKE_UA = 'Mozilla/5.0 (Linux; Android 10; SM-G960F) AppleWebKit/537.36';
+
+// HTMLRewriter 用于重写 M3U8 中的链接为代理格式
+class M3URewriter {
+  constructor(requestUrl, originalTargetUrl) {
+    this.requestUrl = new URL(requestUrl);
+    this.originalTargetUrl = new URL(originalTargetUrl);
+  }
+
+  element(element) {}
+
+  text(text) {
+    let newText = text.text;
+    
+    // 重写完整 URL
+    newText = newText.replace(/(https?:\/\/[^\s"'\]]+)/g, (match) => {
+      if (match.includes(this.requestUrl.host)) return match;
+      const encodedTarget = btoa(encodeURIComponent(match));
+      return `${this.requestUrl.origin}/p/${encodedTarget}`;
+    });
+    
+    // 重写相对路径（.m3u8, .ts 等）
+    newText = newText.replace(/([^\n#]*\.(m3u8|ts)[^\s]*)/g, (match) => {
+      if (match.startsWith('http')) return match; // 已是完整 URL
+      if (match.includes(this.requestUrl.host)) return match; // 已是代理链接
+      
+      // 将相对路径转换为完整 URL
+      try {
+        const absoluteUrl = new URL(match, this.originalTargetUrl).href;
+        const encodedTarget = btoa(encodeURIComponent(absoluteUrl));
+        return `${this.requestUrl.origin}/p/${encodedTarget}`;
+      } catch (e) {
+        return match; // 保持原样
+      }
+    });
+    
+    text.replace(newText, { html: false });
+  }
+}
 
 /**
  * Base64 解码函数（安全版）
@@ -76,18 +124,12 @@ async function handleRequest(request) {
         }
       } else {
         // 这是相对路径请求，比如 /p/01.m3u8?msisdn=...
-        // 我们需要从原始 M3U8 请求中获取基础 URL 来构建完整 URL
-        
-        // 由于无法直接获取原始请求上下文，我们需要一种新的策略
-        // 假设这是从主 M3U8 派生的请求，我们需要存储原始 URL 的映射
-        // 但 Cloudflare Workers 是无状态的，所以我们需要另一种方法
-        
-        // 策略：尝试从 Referer 获取原始 URL，然后构建相对路径
+        // 尝试从 Referer 获取原始请求上下文
         const referer = request.headers.get('Referer');
         if (referer) {
           try {
             const refererUrl = new URL(referer);
-            // 如果 Referer 也是我们的代理 URL，从中提取原始 URL
+            // 检查 Referer 是否也是我们的代理 URL
             const refererPathParts = refererUrl.pathname.split('/');
             if (refererPathParts[1] === 'p' && refererPathParts[2]) {
               const refererEncoded = refererPathParts[2];
@@ -95,7 +137,7 @@ async function handleRequest(request) {
                 const refererDecoded = safeDecode(refererEncoded);
                 const refererOriginal = decodeURIComponent(refererDecoded);
                 
-                // 构建相对路径的完整 URL
+                // 从原始 URL 构建相对路径的完整 URL
                 const relativePath = encodedTarget + url.search;
                 const finalTarget = new URL(relativePath, refererOriginal).href;
                 
@@ -103,13 +145,13 @@ async function handleRequest(request) {
               }
             }
           } catch (e) {
-            // 如果 Referer 解析失败，继续下面的处理
+            // 如果 Referer 解析失败，记录但继续
           }
         }
         
         // 如果仍然无法构建目标 URL，返回错误
         if (!targetUrl) {
-          return new Response(`错误: 无法处理相对路径请求: ${encodedTarget}\n\n请确保主 M3U8 文件被正确重写。`, {
+          return new Response(`错误: 无法处理相对路径请求。请确保主 M3U8 文件被正确重写。\n\n收到请求: ${url.pathname}${url.search}\nReferer: ${referer || 'none'}`, {
             status: 400,
             headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
           });
@@ -120,7 +162,7 @@ async function handleRequest(request) {
 
   // === 3. 验证目标 URL ===
   if (!targetUrl) {
-    return new Response('v1错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
+    return new Response('v2错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
     });
@@ -154,13 +196,30 @@ async function handleRequest(request) {
   try {
     const response = await fetch(targetUrl, proxyOptions);
 
+    // 获取原始响应类型
+    const contentType = response.headers.get('content-type') || '';
+    const isMedia = mediaTypes.some(type => contentType.includes(type));
+    const isHtml = contentType.includes('text/html') || contentType.includes('text/plain');
+
     // 构造新的响应头
     const newHeaders = new Headers(response.headers);
     Object.entries(corsHeaders).forEach(([key, value]) => {
       newHeaders.set(key, value);
     });
 
-    // 直接返回响应，不进行重写（因为相对路径已经处理了）
+    // 如果是 M3U8 或文本类媒体，使用 HTMLRewriter 重写内容
+    if (isMedia || isHtml) {
+      return new HTMLRewriter()
+        .on('body', new M3URewriter(request.url, targetUrl))
+        .transform(
+          new Response(response.body, {
+            ...response,
+            headers: newHeaders
+          })
+        );
+    }
+
+    // 普通响应直接返回
     return new Response(response.body, {
       ...response,
       headers: newHeaders
