@@ -639,32 +639,51 @@ function selectChannel(name) {
         logDebug(`频道列表渲染完成，共 ${Object.keys(allChannels).length} 个频道`, 'success');
     }
 
-    // 选择频道
-    function selectChannel(name) {
-        logDebug(`选择频道: ${name}`, 'info');
-        currentChannel = name;
-        
-        document.querySelectorAll('.channel-item').forEach(el => {
-            el.classList.remove('active');
-        });
-        
-        const items = document.querySelectorAll('.channel-item');
-        for (let el of items) {
-            if (el.textContent.includes(name)) {
-                el.classList.add('active');
-                break;
-            }
-        }
-
-        document.getElementById('currentPlayback').textContent = name;
-        renderSourceSwitcher();
-        
-        if (allChannels[name] && allChannels[name].length > 0) {
-            const proxy = document.getElementById('corsProxy').value;
-            const url = buildProxyUrl(proxy, allChannels[name][0].url);
-            playStream(url, name + " (源1)");
+// 选择频道
+function selectChannel(name) {
+    logDebug(`选择频道: ${name}`, 'info');
+    currentChannel = name;
+    
+    document.querySelectorAll('.channel-item').forEach(el => {
+        el.classList.remove('active');
+    });
+    
+    const items = document.querySelectorAll('.channel-item');
+    for (let el of items) {
+        if (el.textContent.includes(name)) {
+            el.classList.add('active');
+            break;
         }
     }
+
+    document.getElementById('currentPlayback').textContent = name;
+    renderSourceSwitcher();
+    
+    if (allChannels[name] && allChannels[name].length > 0) {
+        const proxy = document.getElementById('corsProxy').value;
+        const originalUrl = allChannels[name][0].url;  // 原始 M3U8 URL
+        const url = buildProxyUrl(proxy, originalUrl); // 通过代理处理
+        playStream(url, name + " (源1)");
+    }
+}
+
+// 切换源
+function switchSource(index) {
+    logDebug(`切换源: ${currentChannel} 的源 ${index + 1}`, 'info');
+    const sources = allChannels[currentChannel];
+    if (index >= 0 && index < sources.length) {
+        const proxy = document.getElementById('corsProxy').value;
+        const originalUrl = sources[index].url;  // 原始 M3U8 URL
+        const url = buildProxyUrl(proxy, originalUrl); // 通过代理处理
+        const label = `${currentChannel} (源${index + 1})`;
+        
+        playStream(url, label);
+
+        document.querySelectorAll('.source-item').forEach((btn, i) => {
+            btn.classList.toggle('active', i === index);
+        });
+    }
+}
 
     // 渲染源切换器
     function renderSourceSwitcher() {
@@ -685,27 +704,6 @@ function selectChannel(name) {
         });
     }
 
-    // 切换源
-
-function switchSource(index) {
-    logDebug(`切换源: ${currentChannel} 的源 ${index + 1}`, 'info');
-    const sources = allChannels[currentChannel];
-    if (index >= 0 && index < sources.length) {
-        // 获取当前代理设置
-        const proxy = document.getElementById('corsProxy').value;
-        // 获取原始 M3U8 URL
-        const originalUrl = sources[index].url;
-        // 通过代理处理
-        const url = buildProxyUrl(proxy, originalUrl);
-        const label = `${currentChannel} (源${index + 1})`;
-        
-        playStream(url, label);
-
-        document.querySelectorAll('.source-item').forEach((btn, i) => {
-            btn.classList.toggle('active', i === index);
-        });
-    }
-}
 
     // 播放流
     function playStream(url, label) {
