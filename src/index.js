@@ -1,6 +1,6 @@
 /**
- * M3U/CORS 代理服务 - 透明前缀代理版
- * 支持 /https://... 和 /http://... 前缀代理
+ * M3U/CORS 代理服务 - Base64 路径代理版
+ * 支持 /p/... 路径代理
  * 自动重写 M3U8 内部链接为代理格式
  */
 
@@ -25,15 +25,13 @@ const mediaTypes = [
 // 模拟设备的 User-Agent
 const FAKE_UA = 'Mozilla/5.0 (Linux; Android 10; SM-G960F) AppleWebKit/537.36';
 
-// HTMLRewriter 用于重写 M3U8 中的链接为透明前缀代理
+// HTMLRewriter 用于重写 M3U8 中的链接为代理格式
 class M3URewriter {
   constructor(requestUrl) {
     this.requestUrl = new URL(requestUrl);
   }
 
-  element(element) {
-    // 不处理 HTML，仅用于文本流
-  }
+  element(element) {}
 
   text(text) {
     const newText = text.text
@@ -41,10 +39,26 @@ class M3URewriter {
       .replace(/(https?:\/\/[^\s"'\]]+)/g, (match) => {
         // 避免递归代理：如果已经是代理链接，则不再包装
         if (match.includes(this.requestUrl.host)) return match;
-        // 使用当前 Worker 地址作为透明前缀代理
-        return `${this.requestUrl.origin}${match}`;
+        // 使用 Base64 编码的路径代理
+        const encodedTarget = btoa(encodeURIComponent(match));
+        return `${this.requestUrl.origin}/p/${encodedTarget}`;
       });
     text.replace(newText, { html: false });
+  }
+}
+
+/**
+ * Base64 解码函数（安全版）
+ */
+function safeDecode(str) {
+  try {
+    // 移除可能的 URL 安全 Base64 字符
+    str = str.replace(/-/g, '+').replace(/_/g, '/');
+    // 补齐 padding
+    while (str.length % 4) str += '=';
+    return atob(str);
+  } catch (e) {
+    throw new Error('Base64 解码失败');
   }
 }
 
@@ -62,7 +76,7 @@ async function handleRequest(request) {
     });
   }
 
-  // === 2. 解析目标 URL：支持两种模式 ===
+  // === 2. 解析目标 URL：支持多种模式 ===
   let targetUrl = null;
 
   // 模式 1: ?url= 参数代理（向后兼容）
@@ -81,22 +95,29 @@ async function handleRequest(request) {
     }
   }
 
-  // 模式 2: 透明前缀代理 (路径代理)
+  // 模式 2: Base64 路径代理 /p/...
   if (!targetUrl) {
-    const path = url.pathname;
-    if (path.startsWith('/http://') || path.startsWith('/https://')) {
-      // 移除前缀斜杠，获取真实 URL
-      targetUrl = path.substring(1);
-      // 如果有查询参数，也拼接上去
-      if (url.search) {
-        targetUrl += url.search;
+    const pathParts = url.pathname.split('/');
+    if (pathParts[1] === 'p' && pathParts[2]) {
+      try {
+        const encodedTarget = pathParts[2];
+        const decodedUrl = safeDecode(encodedTarget);
+        targetUrl = decodeURIComponent(decodedUrl);
+      } catch (err) {
+        return new Response('错误: 无效的 Base64 编码', {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'text/plain; charset=utf-8'
+          }
+        });
       }
     }
   }
 
   // === 3. 验证目标 URL ===
   if (!targetUrl) {
-    return new Response('错误: 请提供目标 URL (url 参数或路径代理)', {
+    return new Response('错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
       status: 400,
       headers: {
         ...corsHeaders,
@@ -122,9 +143,9 @@ async function handleRequest(request) {
   const proxyOptions = {
     method: request.method,
     headers: {
-      'User-Agent': FAKE_UA, // 使用模拟设备 UA
+      'User-Agent': FAKE_UA,
       'Referer': new URL(targetUrl).origin,
-      'Origin': this.requestUrl.origin
+      'Origin': url.origin
     },
     redirect: 'follow'
   };
@@ -134,7 +155,7 @@ async function handleRequest(request) {
   delete proxyOptions.headers['origin'];
   delete proxyOptions.headers['referer'];
 
-  // === 5. 发起代理请求（关键：添加 try-catch）===
+  // === 5. 发起代理请求 ===
   try {
     const response = await fetch(targetUrl, proxyOptions);
 
@@ -168,10 +189,8 @@ async function handleRequest(request) {
     });
 
   } catch (err) {
-    // ✅ 捕获所有网络异常（DNS 失败、连接超时、TLS 错误等）
     console.error('代理请求失败:', err);
-
-    return new Response(`代理请求失败: ${err.message}\n\n请检查目标地址是否可访问。`, {
+    return new Response(`代理请求失败: ${err.message}`, {
       status: 500,
       headers: {
         ...corsHeaders,
