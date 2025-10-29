@@ -27,17 +27,12 @@ class M3URewriter {
     this.requestUrl = new URL(requestUrl);
   }
 
-  element(element) {
-    // 不处理 HTML，仅用于文本流
-  }
+  element(element) {}
 
   text(text) {
     const newText = text.text
-      // 匹配以 http:// 或 https:// 开头的 URL
       .replace(/(https?:\/\/[^\s"'\]]+)/g, (match) => {
-        // 避免递归代理：如果已经是代理链接，则不再包装
         if (match.includes(this.requestUrl.host)) return match;
-        // 使用当前 Worker 地址作为代理前缀
         return `${this.requestUrl.origin}?url=${encodeURIComponent(match)}`;
       });
     text.replace(newText, { html: false });
@@ -133,9 +128,7 @@ async function handleRequest(request) {
     });
 
   } catch (err) {
-    // ✅ 捕获所有网络异常（DNS 失败、连接超时、TLS 错误等）
     console.error('代理请求失败:', err);
-
     return new Response(`代理请求失败: ${err.message}\n\n请检查目标地址是否可访问。`, {
       status: 500,
       headers: {
