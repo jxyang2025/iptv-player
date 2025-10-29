@@ -552,7 +552,7 @@ function buildProxyUrl(proxy, url) {
         
         logDebug(`M3U解析完成，共找到 ${Object.keys(allChannels).length} 个频道`, 'success');
     }******/
-    // 解析 M3U 内容
+// 解析 M3U 内容
 function parseM3U(m3u) {
     logDebug("开始解析M3U内容", 'info');
     const lines = m3u.split('\n');
@@ -572,13 +572,10 @@ function parseM3U(m3u) {
                     allChannels[channelName] = [];
                 }
                 
-                // 只处理原始 URL，不进行双重代理
-                const originalUrl = ensureHTTPS(line.trim());
-                
-                // 直接存储原始 URL，播放时再通过代理
+                // 存储原始 URL（不是代理后的）
                 allChannels[channelName].push({ 
                     name: channelName, 
-                    url: originalUrl  // 存储原始 URL
+                    url: ensureHTTPS(line.trim())  // 存储原始 URL
                 });
                 channelCount++;
                 channelName = '';
@@ -588,7 +585,6 @@ function parseM3U(m3u) {
     
     logDebug(`M3U解析完成，共找到 ${Object.keys(allChannels).length} 个频道`, 'success');
 }
-
 // 修改 selectChannel 函数，播放时进行代理
 // 选择频道
 function selectChannel(name) {
