@@ -585,37 +585,7 @@ function parseM3U(m3u) {
     
     logDebug(`M3U解析完成，共找到 ${Object.keys(allChannels).length} 个频道`, 'success');
 }
-// 修改 selectChannel 函数，播放时进行代理
-// 选择频道
-function selectChannel(name) {
-    logDebug(`选择频道: ${name}`, 'info');
-    currentChannel = name;
-    
-    document.querySelectorAll('.channel-item').forEach(el => {
-        el.classList.remove('active');
-    });
-    
-    const items = document.querySelectorAll('.channel-item');
-    for (let el of items) {
-        if (el.textContent.includes(name)) {
-            el.classList.add('active');
-            break;
-        }
-    }
 
-    document.getElementById('currentPlayback').textContent = name;
-    renderSourceSwitcher();
-    
-    if (allChannels[name] && allChannels[name].length > 0) {
-        // 关键修改：使用原始 URL，但在 playStream 中通过代理
-        const proxy = document.getElementById('corsProxy').value;
-        const originalUrl = allChannels[name][0].url;  // 这是原始 M3U8 URL
-        
-        // 通过代理处理
-        const url = buildProxyUrl(proxy, originalUrl);
-        playStream(url, name + " (源1)");
-    }
-}
 
     // 渲染频道列表
     function renderChannelList() {
@@ -662,7 +632,9 @@ function selectChannel(name) {
     if (allChannels[name] && allChannels[name].length > 0) {
         const proxy = document.getElementById('corsProxy').value;
         const originalUrl = allChannels[name][0].url;  // 原始 M3U8 URL
-        const url = buildProxyUrl(proxy, originalUrl); // 通过代理处理
+        
+        // 确保使用正确的代理设置
+        const url = buildProxyUrl(proxy, originalUrl);
         playStream(url, name + " (源1)");
     }
 }
@@ -674,7 +646,7 @@ function switchSource(index) {
     if (index >= 0 && index < sources.length) {
         const proxy = document.getElementById('corsProxy').value;
         const originalUrl = sources[index].url;  // 原始 M3U8 URL
-        const url = buildProxyUrl(proxy, originalUrl); // 通过代理处理
+        const url = buildProxyUrl(proxy, originalUrl);
         const label = `${currentChannel} (源${index + 1})`;
         
         playStream(url, label);
