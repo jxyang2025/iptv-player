@@ -128,7 +128,7 @@ async function handleRequest(request) {
 
   // === 3. 验证目标 URL ===
   if (!targetUrl) {
-    return new Response('错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
+    return new Response('版本v1错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
       status: 400,
       headers: {
         ...corsHeaders,
@@ -215,4 +215,5 @@ async function handleRequest(request) {
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
 });
+
 
