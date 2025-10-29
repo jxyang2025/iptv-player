@@ -1,5 +1,5 @@
 /**
- * M3U/CORS 代理服务 - 强制检测版
+ * M3U/CORS 代理服务 - 最终确保版
  */
 
 // CORS 允许的头部
@@ -64,23 +64,17 @@ function safeDecode(str) {
 }
 
 /**
- * 检查内容是否为 M3U8 格式（非常宽松的检测）
+ * 检查内容是否为 M3U8 格式
  */
 function isM3U8Content(content) {
   const lowerContent = content.toLowerCase();
-  
   // 检查多种 M3U8 标识
-  if (lowerContent.includes('#extm3u')) return true;  // 标准 M3U8 标识
-  if (lowerContent.includes('.m3u8')) return true;    // 包含 M3U8 文件
-  if (lowerContent.includes('.ts')) return true;      // 包含 TS 文件
-  if (lowerContent.includes('#extinf')) return true;  // 包含 EXTINF 标签
-  if (lowerContent.includes('#ext-x-stream-inf')) return true;  // 包含流信息
-  if (lowerContent.includes('#ext-x-targetduration')) return true;  // 包含目标时长
-  
-  // 检查是否包含常见的 M3U8 相关参数
-  if (lowerContent.includes('msisdn=') || lowerContent.includes('timestamp=')) return true;
-  
-  return false;
+  return lowerContent.includes('#extm3u') || 
+         lowerContent.includes('.m3u8') || 
+         lowerContent.includes('#extinf') ||
+         lowerContent.includes('.ts') ||
+         lowerContent.includes('#ext-x-stream-inf') ||
+         lowerContent.includes('#ext-x-targetduration');
 }
 
 /**
@@ -210,7 +204,7 @@ async function handleRequest(request) {
       newHeaders.set(key, value);
     });
 
-    // 强制检测 M3U8 内容（非常宽松的检测）
+    // 检查是否需要重写
     let shouldRewrite = false;
     
     // 检查 Content-Type
@@ -227,8 +221,8 @@ async function handleRequest(request) {
     
     if (isMedia) {
       shouldRewrite = true;
-    } else {
-      // 对于任何其他类型，都检查内容
+    } else if (contentType.includes('text/plain') || contentType.includes('text/html')) {
+      // 对于 text 类型，检查内容
       const clonedResponse = response.clone();
       const content = await clonedResponse.text();
       
