@@ -1,152 +1,147 @@
 /**
- * M3U/CORS 代理服务 - 修复版
- * 支持自动重写 M3U8、TS 等流媒体链接，解决跨域问题
+ * 米谷视频 M3U 代理 Worker
+ * 支持自动抓取 interface.txt 并代理加密流
  */
 
-// CORS 允许的头部
+const GITHUB_RAW = 'https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/interface.txt';
+const PROXY_PREFIX = 'https://m3u.521986.xyz/proxy';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-  'Access-Control-Allow-Headers': '*',
-  'Access-Control-Max-Age': '86400'
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Max-Age': '86400',
+  'Access-Control-Allow-Headers': '*'
 };
 
-// M3U8/TS 等媒体内容类型
-const mediaTypes = [
-  'application/vnd.apple.mpegurl',
-  'application/x-mpegurl',
-  'audio/mpegurl',
-  'audio/x-mpegurl',
-  'video/mp2t',
-  'application/octet-stream'
-];
-
-// HTMLRewriter 用于重写 M3U8 中的相对链接为代理链接
-class M3URewriter {
-  constructor(requestUrl) {
-    this.requestUrl = new URL(requestUrl);
-  }
-
-  element(element) {
-    // 不处理 HTML，仅用于文本流
-  }
-
-  text(text) {
-    const newText = text.text
-      // 匹配以 http:// 或 https:// 开头的 URL
-      .replace(/(https?:\/\/[^\s"'\]]+)/g, (match) => {
-        // 避免递归代理：如果已经是代理链接，则不再包装
-        if (match.includes(this.requestUrl.host)) return match;
-        // 使用当前 Worker 地址作为代理前缀
-        return `${this.requestUrl.origin}?url=${encodeURIComponent(match)}`;
-      });
-    text.replace(newText, { html: false });
-  }
-}
+// 模拟安卓设备请求
+const FAKE_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G960F) AppleWebKit/537.36',
+  'Referer': 'https://m3u.521986.xyz/',
+  'Origin': 'https://m3u.521986.xyz'
+};
 
 /**
- * 主处理函数
+ * 主请求处理
  */
 async function handleRequest(request) {
   const url = new URL(request.url);
 
-  // === 1. 处理 OPTIONS 预检请求 ===
+  // 预检请求
   if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: corsHeaders
-    });
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  // === 2. 检查是否提供 url 参数 ===
-  let targetUrl = url.searchParams.get('url');
-  if (!targetUrl) {
-    return new Response('错误: 请提供 M3U 订阅链接或流地址作为 "url" 参数。', {
-      status: 400,
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'text/plain; charset=utf-8'
-      }
-    });
+  // 路由分发
+  if (url.pathname === '/' || url.pathname === '/playlist.m3u8') {
+    return await generatePlaylist();
   }
 
-  // 确保 targetUrl 是合法 URL
+  if (url.pathname === '/proxy') {
+    return await handleProxy(request);
+  }
+
+  return new Response('Not Found', { status: 404 });
+}
+
+/**
+ * 生成 M3U 播放列表
+ */
+async function generatePlaylist() {
   try {
-    targetUrl = new URL(targetUrl).href;
-  } catch (err) {
-    return new Response('错误: 无效的 URL 格式。', {
-      status: 400,
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'text/plain; charset=utf-8'
+    const response = await fetch(GITHUB_RAW);
+    const text = await response.text();
+
+    const lines = text.split('\n');
+    let m3u = '#EXTM3U x-tvg-url="https://live.fanmingming.com/tvg/epg.xml"\n';
+
+    for (let line of lines) {
+      line = line.trim();
+      if (line.startsWith('#') || !line.includes('http')) continue;
+
+      const match = line.match(/(CCTV-\d+.*?)\s+(https?:\/\/.*)/i);
+      if (match) {
+        const name = match[1].trim();
+        const rawUrl = match[2].trim();
+
+        // 构造代理 URL
+        const proxyUrl = `${PROXY_PREFIX}?target=${encodeURIComponent(rawUrl)}`;
+
+        m3u += `#EXTINF:-1 tvg-id="${name}" tvg-name="${name}" group-title="央视",${name}\n`;
+        m3u += `${proxyUrl}\n`;
       }
-    });
-  }
-
-  // === 3. 设置代理请求选项 ===
-  const proxyOptions = {
-    method: request.method,
-    headers: {
-      'User-Agent': request.headers.get('User-Agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Referer': new URL(targetUrl).origin,
-      'Origin': request.headers.get('Origin') || new URL(targetUrl).origin
-    },
-    redirect: 'follow'
-  };
-
-  // 移除可能干扰的头部
-  delete proxyOptions.headers['host'];
-  delete proxyOptions.headers['origin'];
-  delete proxyOptions.headers['referer'];
-
-  // === 4. 发起代理请求（关键：添加 try-catch）===
-  try {
-    const response = await fetch(targetUrl, proxyOptions);
-
-    // 获取原始响应类型
-    const contentType = response.headers.get('content-type') || '';
-    const isMedia = mediaTypes.some(type => contentType.includes(type));
-    const isHtml = contentType.includes('text/html') || contentType.includes('text/plain');
-
-    // 构造新的响应头
-    const newHeaders = new Headers(response.headers);
-    Object.entries(corsHeaders).forEach(([key, value]) => {
-      newHeaders.set(key, value);
-    });
-
-    // 如果是 M3U8 或文本类媒体，使用 HTMLRewriter 重写内容
-    if (isMedia || isHtml) {
-      return new HTMLRewriter()
-        .on('body', new M3URewriter(request.url))
-        .transform(
-          new Response(response.body, {
-            ...response,
-            headers: newHeaders
-          })
-        );
     }
 
-    // 普通响应直接返回
-    return new Response(response.body, {
-      ...response,
-      headers: newHeaders
+    return new Response(m3u, {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/x-mpegurl; charset=utf-8',
+        'Cache-Control': 'no-cache'
+      }
     });
 
   } catch (err) {
-    // ✅ 捕获所有网络异常（DNS 失败、连接超时、TLS 错误等）
-    console.error('代理请求失败:', err);
-
-    return new Response(`代理请求失败: ${err.message}\n\n请检查目标地址是否可访问。`, {
+    return new Response(`#EXTM3U\n#EXTINF:-1,抓取失败: ${err.message}`, {
       status: 500,
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'text/plain; charset=utf-8'
-      }
+      headers: { 'Content-Type': 'text/plain' }
     });
   }
 }
 
-// 注册请求处理器
+/**
+ * 代理真实 m3u8 和 ts 请求
+ */
+async function handleProxy(request) {
+  const url = new URL(request.url);
+  const target = url.searchParams.get('target');
+
+  if (!target) {
+    return new Response('Missing "target" parameter', { status: 400 });
+  }
+
+  try {
+    const upstreamUrl = new URL(target);
+    const proxyRequest = new Request(upstreamUrl, {
+      method: request.method,
+      headers: FAKE_HEADERS,
+      redirect: 'follow'
+    });
+
+    const response = await fetch(proxyRequest);
+
+    // 如果是 m3u8，可以继续重写内部的 ts 链接（可选）
+    let body = response.body;
+    const contentType = response.headers.get('Content-Type') || '';
+
+    if (contentType.includes('application/vnd.apple.mpegurl') ||
+        contentType.includes('audio/mpegurl') ||
+        url.pathname.endsWith('.m3u8')) {
+
+      const text = await response.text();
+      body = rewriteM3u8Content(text, upstreamUrl.origin);
+    }
+
+    const modifiedResponse = new Response(body, response);
+    Object.entries(corsHeaders).forEach(([k, v]) => {
+      modifiedResponse.headers.set(k, v);
+    });
+
+    return modifiedResponse;
+
+  } catch (err) {
+    return new Response(`[Proxy Error] ${err.message}`, { status: 500 });
+  }
+}
+
+/**
+ * 可选：重写 m3u8 内部的 ts 链接，防止直连
+ */
+function rewriteM3u8Content(content, baseOrigin) {
+  return content.replace(/(https?:\/\/[^\s"']+\.ts[^\s"']*)/g, (match) => {
+    return `${PROXY_PREFIX}?target=${encodeURIComponent(match)}`;
+  });
+}
+
+// 注册事件
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
 });
