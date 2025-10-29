@@ -1,7 +1,5 @@
 /**
- * M3U/CORS 代理服务 - Base64 路径代理版
- * 支持 /p/... 路径代理
- * 自动重写 M3U8 内部链接为代理格式
+ * M3U/CORS 代理服务 - 增强版（支持相对路径）
  */
 
 // CORS 允许的头部
@@ -27,8 +25,9 @@ const FAKE_UA = 'Mozilla/5.0 (Linux; Android 10; SM-G960F) AppleWebKit/537.36';
 
 // HTMLRewriter 用于重写 M3U8 中的链接为代理格式
 class M3URewriter {
-  constructor(requestUrl) {
+  constructor(requestUrl, originalTargetUrl) {
     this.requestUrl = new URL(requestUrl);
+    this.originalTargetUrl = new URL(originalTargetUrl);
   }
 
   element(element) {}
@@ -45,13 +44,18 @@ class M3URewriter {
     
     // 重写相对路径（.m3u8, .ts 等）
     newText = newText.replace(/([^\n#]*\.(m3u8|ts)[^\s]*)/g, (match) => {
-      if (match.startsWith('http')) return match; // 已是完整 URL，跳过
-      if (match.includes(this.requestUrl.host)) return match; // 已是代理链接，跳过
+      if (match.startsWith('http')) return match; // 已是完整 URL
+      if (match.includes(this.requestUrl.host)) return match; // 已是代理链接
       
-      // 构造完整的目标 URL
-      // 需要从原始请求中获取基础 URL 来构建完整路径
-      // 这里需要更复杂的逻辑
-      return match; // 暂时保持原样
+      // 将相对路径转换为完整 URL
+      try {
+        const absoluteUrl = new URL(match, this.originalTargetUrl).href;
+        const encodedTarget = btoa(encodeURIComponent(absoluteUrl));
+        return `${this.requestUrl.origin}/p/${encodedTarget}`;
+      } catch (e) {
+        // 如果 URL 解析失败，保持原样
+        return match;
+      }
     });
     
     text.replace(newText, { html: false });
@@ -63,9 +67,7 @@ class M3URewriter {
  */
 function safeDecode(str) {
   try {
-    // 移除可能的 URL 安全 Base64 字符
     str = str.replace(/-/g, '+').replace(/_/g, '/');
-    // 补齐 padding
     while (str.length % 4) str += '=';
     return atob(str);
   } catch (e) {
@@ -89,6 +91,7 @@ async function handleRequest(request) {
 
   // === 2. 解析目标 URL：支持多种模式 ===
   let targetUrl = null;
+  let isBase64Encoded = false;
 
   // 模式 1: ?url= 参数代理（向后兼容）
   const urlParam = url.searchParams.get('url');
@@ -98,10 +101,7 @@ async function handleRequest(request) {
     } catch (err) {
       return new Response('错误: 无效的 URL 格式 (url 参数)', {
         status: 400,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'text/plain; charset=utf-8'
-        }
+        headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
       });
     }
   }
@@ -110,17 +110,28 @@ async function handleRequest(request) {
   if (!targetUrl) {
     const pathParts = url.pathname.split('/');
     if (pathParts[1] === 'p' && pathParts[2]) {
-      try {
-        const encodedTarget = pathParts[2];
-        const decodedUrl = safeDecode(encodedTarget);
-        targetUrl = decodeURIComponent(decodedUrl);
-      } catch (err) {
-        return new Response('错误: 无效的 Base64 编码', {
+      const encodedTarget = pathParts[2];
+      
+      // 检查是否是 Base64 编码
+      if (encodedTarget.length >= 4 && encodedTarget.match(/^[A-Za-z0-9+/]*={0,2}$/)) {
+        // Base64 编码的完整 URL
+        try {
+          const decodedUrl = safeDecode(encodedTarget);
+          targetUrl = decodeURIComponent(decodedUrl);
+          isBase64Encoded = true;
+        } catch (err) {
+          return new Response('错误: 无效的 Base64 编码', {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
+          });
+        }
+      } else {
+        // 可能是相对路径，需要从原始请求中构建完整 URL
+        // 这里需要从 Referer 或其他方式获取原始基础 URL
+        // 由于无法在路径中获取原始 URL，返回错误
+        return new Response('错误: 无法处理相对路径，请使用完整 Base64 编码 URL', {
           status: 400,
-          headers: {
-            ...corsHeaders,
-            'Content-Type': 'text/plain; charset=utf-8'
-          }
+          headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
         });
       }
     }
@@ -128,25 +139,18 @@ async function handleRequest(request) {
 
   // === 3. 验证目标 URL ===
   if (!targetUrl) {
-    return new Response('版本v1错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
+    return new Response('错误: 请提供目标 URL (url 参数或 /p/... 路径)', {
       status: 400,
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'text/plain; charset=utf-8'
-      }
+      headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
     });
   }
 
   try {
-    // 确保 targetUrl 是合法 URL
     targetUrl = new URL(targetUrl).href;
   } catch (err) {
     return new Response('错误: 无效的 URL 格式', {
       status: 400,
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'text/plain; charset=utf-8'
-      }
+      headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
     });
   }
 
@@ -161,7 +165,6 @@ async function handleRequest(request) {
     redirect: 'follow'
   };
 
-  // 移除可能干扰的头部
   delete proxyOptions.headers['host'];
   delete proxyOptions.headers['origin'];
   delete proxyOptions.headers['referer'];
@@ -184,7 +187,7 @@ async function handleRequest(request) {
     // 如果是 M3U8 或文本类媒体，使用 HTMLRewriter 重写内容
     if (isMedia || isHtml) {
       return new HTMLRewriter()
-        .on('body', new M3URewriter(request.url))
+        .on('body', new M3URewriter(request.url, targetUrl))  // 传入原始目标 URL
         .transform(
           new Response(response.body, {
             ...response,
@@ -203,17 +206,11 @@ async function handleRequest(request) {
     console.error('代理请求失败:', err);
     return new Response(`代理请求失败: ${err.message}`, {
       status: 500,
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'text/plain; charset=utf-8'
-      }
+      headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' }
     });
   }
 }
 
-// 注册请求处理器
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
 });
-
-
