@@ -1,5 +1,5 @@
 /**
- * M3U/CORS 代理服务 - 超强检测版
+ * M3U/CORS 代理服务 - 强制检测版
  */
 
 // CORS 允许的头部
@@ -64,28 +64,21 @@ function safeDecode(str) {
 }
 
 /**
- * 检查内容是否为 M3U8 格式（增强版）
+ * 检查内容是否为 M3U8 格式（非常宽松的检测）
  */
 function isM3U8Content(content) {
   const lowerContent = content.toLowerCase();
-  const lines = content.split('\n');
   
-  // 检查是否包含 M3U8 标识
-  if (lowerContent.includes('#extm3u')) return true;
+  // 检查多种 M3U8 标识
+  if (lowerContent.includes('#extm3u')) return true;  // 标准 M3U8 标识
+  if (lowerContent.includes('.m3u8')) return true;    // 包含 M3U8 文件
+  if (lowerContent.includes('.ts')) return true;      // 包含 TS 文件
+  if (lowerContent.includes('#extinf')) return true;  // 包含 EXTINF 标签
+  if (lowerContent.includes('#ext-x-stream-inf')) return true;  // 包含流信息
+  if (lowerContent.includes('#ext-x-targetduration')) return true;  // 包含目标时长
   
-  // 检查是否包含 M3U8/TS 文件扩展名
-  if (lowerContent.includes('.m3u8') || lowerContent.includes('.ts')) return true;
-  
-  // 检查是否包含常见的 M3U8 标签
-  const m3u8Tags = ['#extinf', '#ext-x-stream-inf', '#ext-x-version', '#ext-x-targetduration'];
-  for (const tag of m3u8Tags) {
-    if (lowerContent.includes(tag)) return true;
-  }
-  
-  // 检查是否有 EXTINF 标签（即使没有 #EXTM3U）
-  for (const line of lines) {
-    if (line.trim().toLowerCase().startsWith('#extinf')) return true;
-  }
+  // 检查是否包含常见的 M3U8 相关参数
+  if (lowerContent.includes('msisdn=') || lowerContent.includes('timestamp=')) return true;
   
   return false;
 }
@@ -217,27 +210,28 @@ async function handleRequest(request) {
       newHeaders.set(key, value);
     });
 
-    // 检查是否需要重写 - 强制检测 M3U8 内容
+    // 强制检测 M3U8 内容（非常宽松的检测）
     let shouldRewrite = false;
     
     // 检查 Content-Type
-    const isMedia = [
+    const mediaTypes = [
       'application/vnd.apple.mpegurl',
       'application/x-mpegurl',
       'audio/mpegurl',
       'audio/x-mpegurl',
       'video/mp2t',
       'application/octet-stream'
-    ].some(type => contentType.includes(type));
+    ];
+    
+    const isMedia = mediaTypes.some(type => contentType.includes(type));
     
     if (isMedia) {
       shouldRewrite = true;
     } else {
-      // 对于其他类型，强制检查内容
+      // 对于任何其他类型，都检查内容
       const clonedResponse = response.clone();
       const content = await clonedResponse.text();
       
-      // 检查内容是否包含 M3U8 标识（非常宽松的检测）
       if (isM3U8Content(content)) {
         shouldRewrite = true;
       }
