@@ -590,6 +590,7 @@ function parseM3U(m3u) {
 }
 
 // 修改 selectChannel 函数，播放时进行代理
+// 选择频道
 function selectChannel(name) {
     logDebug(`选择频道: ${name}`, 'info');
     currentChannel = name;
@@ -610,9 +611,11 @@ function selectChannel(name) {
     renderSourceSwitcher();
     
     if (allChannels[name] && allChannels[name].length > 0) {
+        // 关键修改：使用原始 URL，但在 playStream 中通过代理
         const proxy = document.getElementById('corsProxy').value;
-        // 播放时才进行代理处理
-        const originalUrl = allChannels[name][0].url;
+        const originalUrl = allChannels[name][0].url;  // 这是原始 M3U8 URL
+        
+        // 通过代理处理
         const url = buildProxyUrl(proxy, originalUrl);
         playStream(url, name + " (源1)");
     }
@@ -687,26 +690,26 @@ function selectChannel(name) {
     }
 
     // 切换源
-    function switchSource(index) {
-        logDebug(`切换源: ${currentChannel} 的源 ${index + 1}`, 'info');
-        const sources = allChannels[currentChannel];
-        if (index >= 0 && index < sources.length) {
-            const proxy = document.getElementById('corsProxy').value;
-            if (proxy==='http://localhost:3000/m3u?url=')
-             proxy='http://localhost:3000/proxy?url=';
-             console.log("switchSource代理地址："+proxy);
-            logDebug("switchSource代理地址：",proxy);
-            const url = buildProxyUrl(proxy, sources[index].url);
-            const label = `${currentChannel} (源${index + 1})`;
-           console.log("playStream地址："+url);
-                   logDebug("playStream地址：",url);
-            playStream(url, label);
 
-            document.querySelectorAll('.source-item').forEach((btn, i) => {
-                btn.classList.toggle('active', i === index);
-            });
-        }
+function switchSource(index) {
+    logDebug(`切换源: ${currentChannel} 的源 ${index + 1}`, 'info');
+    const sources = allChannels[currentChannel];
+    if (index >= 0 && index < sources.length) {
+        // 获取当前代理设置
+        const proxy = document.getElementById('corsProxy').value;
+        // 获取原始 M3U8 URL
+        const originalUrl = sources[index].url;
+        // 通过代理处理
+        const url = buildProxyUrl(proxy, originalUrl);
+        const label = `${currentChannel} (源${index + 1})`;
+        
+        playStream(url, label);
+
+        document.querySelectorAll('.source-item').forEach((btn, i) => {
+            btn.classList.toggle('active', i === index);
+        });
     }
+}
 
     // 播放流
     function playStream(url, label) {
